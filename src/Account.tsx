@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { authService } from './data/authService'
 import type { Application } from './data/application'
 export function Account({app}:{app:Application}) {
   const [signup,setSignup]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false)
@@ -9,13 +8,13 @@ export function Account({app}:{app:Application}) {
     <h2>Your learning, wherever you go.</h2>
     {!app.configured?<p>Synchronization is not configured yet. Your vocabulary and practice continue locally. Follow SUPABASE_SETUP.md to connect a project.</p>:!app.user?<>
       <p>Sign in to synchronize your vocabulary and progress. You can also keep using this device locally.</p>
-      <form onSubmit={e=>{e.preventDefault();void run(()=>signup?authService.signUp(email,password):authService.signIn(email,password))}}>
+      <form onSubmit={e=>{e.preventDefault();void run(()=>signup?app.auth.signUp(email,password):app.auth.signIn(email,password))}}>
         <label>Email<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label>
         <label>Password<input type="password" autoComplete={signup?'new-password':'current-password'} required minLength={6} value={password} onChange={e=>setPassword(e.target.value)}/></label>
         <div className="test-actions"><button className="primary-button" disabled={busy}>{signup?'Sign up':'Sign in'}</button><button type="button" className="secondary-button" onClick={()=>setSignup(!signup)}>{signup?'I already have an account':'Create an account'}</button></div>
       </form></>:<>
       <p>Signed in as <strong>{app.user.email}</strong></p><p role="status">{app.status}{app.scope==='guest'?' · Account synchronization is paused.':''}</p>
-      <div className="test-actions"><button className="secondary-button" onClick={()=>void run(()=>authService.signOut())} disabled={busy}>Sign out</button><button className="secondary-button" onClick={()=>void app.retry()}>Retry sync</button>{app.scope==='guest'&&!app.migrationOpen&&<button className="primary-button" onClick={()=>app.beginMigration()}>Set up synchronization</button>}</div>
+      <div className="test-actions"><button className="secondary-button" onClick={()=>void run(()=>app.auth.signOut())} disabled={busy}>Sign out</button><button className="secondary-button" onClick={()=>void app.retry()}>Retry sync</button>{app.scope==='guest'&&!app.migrationOpen&&<button className="primary-button" onClick={()=>app.beginMigration()}>Set up synchronization</button>}</div>
       <p className="test-hint">Signing out returns to this device’s separate local vocabulary. Pending account actions stay saved for this account.</p>
     </>}
     {app.migrationOpen&&<section className="migration-panel" aria-label="Local data migration"><h3>We found learning data on this device.</h3><p>Your local copy stays on this device. Nothing is overwritten without your choices.</p>

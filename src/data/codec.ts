@@ -30,6 +30,7 @@ function mapSnapshot(value: unknown,map: IdentityMap,encode: boolean,key=''): un
 export function encodeData(data: AppData,map: IdentityMap): Cells {
   const cells: Cells={}
   for(const word of [...data.vocabulary.entries,...Object.values(data.vocabulary.overrides)])cells[`word/${reference(word.id,map)}`]=json({...word,id:reference(word.id,map)})
+  for(const session of [data.learning.session,data.learning.reviewSession?.practice])if(session?.phase==='completed')for(const q of session.questions)if(data.vocabulary.deletedIds.includes(q.wordId))cells[`archived-word/${reference(q.wordId,map)}`]=json({...q.snapshot.word,id:reference(q.wordId,map)})
   for(const id of data.vocabulary.deletedIds)cells[`deleted/${reference(id,map)}`]=true
   for(const id of data.vocabulary.suppressedBuiltinIds)cells[`suppressed/b:${id}`]=true
   for(const [id,h] of Object.entries(data.learning.history))if(!equal(h,emptyWordHistory()))cells[`progress/${reference(Number(id),map)}`]=json(h)

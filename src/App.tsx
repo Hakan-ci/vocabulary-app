@@ -41,8 +41,11 @@ function Icon({ name, size = 20 }: { name: 'book' | 'star' | 'search' | 'leaf'; 
 }
 function App() {
   const app = application()
-  useSyncExternalStore(app.subscribe, app.getSnapshot)
   useEffect(() => connectApplication(app), [app])
+  return <ApplicationView app={app} />
+}
+export function ApplicationView({app}: {app: Application}) {
+  useSyncExternalStore(app.subscribe, app.getSnapshot)
   return <Workspace key={app.scope} app={app} />
 }
 function Workspace({app}: {app: Application}) {

@@ -1,6 +1,6 @@
 # Kelime
 
-A responsive English–Turkish vocabulary app built with React, TypeScript, and Vite. All data stays in your browser; there is no backend, account, or flashcard feature.
+A responsive English–Turkish vocabulary app built with React, TypeScript, and Vite. It works locally by default, with optional Supabase email/password accounts and safe cloud synchronization. No flashcards are included.
 
 ## Run locally
 
@@ -10,6 +10,12 @@ npm run dev
 ```
 
 Open the local URL printed by Vite. For the built-in test runner, use Node.js 22.18+ or 24+.
+
+## Optional account synchronization
+
+See [SUPABASE_SETUP.md](SUPABASE_SETUP.md) for environment variables, executable SQL/RLS migrations, email confirmation settings, and the live verification checklist. Account data uses separate caches and a durable offline queue. Guest data is retained, and migration requires explicit choices. Supabase credentials are never hardcoded.
+
+`npm test` includes embedded PostgreSQL security and transaction tests. `npm run db:types` regenerates database row types from the schema. Live authentication and multi-device tests require a configured test project.
 
 ## Features
 

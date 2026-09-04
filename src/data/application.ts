@@ -1,3 +1,4 @@
+import { acquireAccountLock } from './accountLock.ts'
 import type { AppData, Cells, OperationKind, CloudTransport } from './models.ts'
 import { newId,equal } from './models.ts'
 import { decodeData,encodeData,emptyIdentities } from './codec.ts'
@@ -16,6 +17,7 @@ import type { LearningState } from '../learningState.ts'
 
 export class Application {
   version=0
+  auth:typeof authService
   user:AccountUser|null=null
   scope='guest'
   error=''
@@ -29,12 +31,14 @@ export class Application {
   private data:AppData
   private storage:StorageAccess
   private listeners=new Set<()=>void>()
+  private releaseAccount:(()=>void)|undefined
   private token=0
   private previewRevision=-1
   private project: string | undefined
   private transport: CloudTransport | undefined
   private stopSync:(()=>void)|undefined
-  constructor(storage:StorageAccess, options: {project?: string; transport?: CloudTransport} = {}) {
+  constructor(storage:StorageAccess, options: {project?: string; transport?: CloudTransport; auth?: typeof authService} = {}) {
+    this.auth=options.auth??authService
     this.project=options.project??configuration?.url
     this.transport=options.transport
     this.storage=storage
@@ -47,12 +51,17 @@ export class Application {
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
   getSnapshot=()=>this.version
+  reportError(error:unknown){this.error=error instanceof Error?error.message:String(error);this.emit()}
   private emit(){this.version++;for(const listener of this.listeners)listener()}
   get current(){return this.data}
   get configured(){return !!this.project}
   get status(){return this.scope==='guest'?'Local only':this.sync?.status??'Sync error'}
   get candidates(){return this.sync?duplicateCandidates(this.guest,this.sync.cache.base.cells):[]}
-  get preview(){return this.sync?prepareMigration(this.guest,this.sync.cache.base.cells,this.sync.cache.migrationIdentities??=emptyIdentities(),this.links,this.choices):null}
+  get preview(){
+    if(!this.sync)return null
+    try{return prepareMigration(this.guest,this.sync.cache.base.cells,this.sync.cache.migrationIdentities??=emptyIdentities(),this.links,this.choices)}
+    catch(e){return {cells:this.sync.cache.base.cells,additions:0,historicalAnswers:0,conflicts:[{key:'identity',label:String(e)+' Choose a separate word or another available target.',device:null,account:null}]}}
+  }
   private refresh=()=>{
     if(this.scope!=='guest'&&this.sync){try{this.data=decodeData(projection(this.sync.cache),this.sync.cache.identities);this.sync.persist(false)}catch(e){this.error=String(e)}}
     this.emit()
@@ -60,12 +69,15 @@ export class Application {
   async setUser(user:AccountUser|null) {
     if(user?.id===this.user?.id&&this.sync)return
     const token=++this.token
-    this.stopSync?.();this.sync?.dispose();this.sync=null;this.user=user;this.scope='guest';this.data=this.guest;this.migrationOpen=false;this.previewOpen=false;this.error='';this.emit()
+    this.stopSync?.();this.sync?.dispose();this.releaseAccount?.();this.releaseAccount=undefined;this.sync=null;this.user=user;this.scope='guest';this.data=this.guest;this.migrationOpen=false;this.previewOpen=false;this.error='';this.emit()
     if(!user||!this.project)return
     try {
+      const release=await acquireAccountLock(this.project,user.id)
+      if(token!==this.token){release();return}
+      this.releaseAccount=release
       const sync=new SyncService(this.storage,cacheKey(this.project,user.id),this.transport??cloudRepository(user.id))
       this.sync=sync;this.stopSync=sync.subscribe(this.refresh)
-      if(sync.cache.initialized&&sync.cache.migrationChoice){this.scope=user.id;this.refresh()}
+      if(sync.cache.initialized&&(sync.cache.migrationChoice||sync.cache.queue.some(op=>op.kind==='migration'&&op.status==='pending'))){this.scope=user.id;this.refresh()}
       await sync.initialize();if(token!==this.token)return
       if(sync.cache.migrationChoice||sync.cache.queue.some(op=>op.kind==='migration'&&op.status==='pending')){this.scope=user.id;sync.schedule()}
       else if(meaningfulLocal(this.guest))this.migrationOpen=true
@@ -85,7 +97,7 @@ export class Application {
     }catch{this.error='A device backup could not be saved. Free browser storage before importing; your data has not been uploaded.';this.emit()}
   }
   chooseConflict(key:string,value:'device'|'account'){this.choices={...this.choices,[key]:value};this.emit()}
-  chooseLink(id:number,target:string){this.links={...this.links,[id]:target};this.emit()}
+  chooseLink(id:number,target:string){if(target!=='new'&&Object.entries(this.links).some(([key,value])=>Number(key)!==id&&value===target)){this.error='Link each account word only once. Keep other entries separate.';this.emit();return}this.error='';this.links={...this.links,[id]:target};this.emit()}
   commitMigration(){
     if(!this.sync||!this.user)return
     if(this.candidates.some(c=>!this.links[c.word.id]))throw Error('Resolve the possible duplicate words first.')
@@ -103,7 +115,7 @@ export class Application {
     this.identifySessions(next)
     if(this.scope==='guest'){this.guest=next;this.data=next;try{saveLocal(this.storage,next);this.storageError=false}catch{this.storageError=true}this.emit();return}
     const sync=this.sync!
-    const before=encodeData(this.data,sync.cache.identities),after=encodeData(next,sync.cache.identities)
+    const before=projection(sync.cache),after=encodeData(next,sync.cache.identities)
     // Tombstones and reads used for deletion are checked in the server transaction too.
     sync.enqueue(kind,before,after);this.data=next;this.emit()
   }
@@ -127,12 +139,12 @@ export class Application {
 let instance:Application|undefined
 export function application(){if(!instance)instance=new Application(localStorage);return instance}
 export function connectApplication(app:Application){
-  let observed=false
-  const unsubscribe=authService.subscribe(user=>{observed=true;queueMicrotask(()=>{void app.setUser(user)})})
-  void authService.current().then(user=>{if(!observed)void app.setUser(user)}).catch(()=>{})
+  let observed=false,active=true
+  const unsubscribe=app.auth.subscribe(user=>{observed=true;queueMicrotask(()=>{if(active)void app.setUser(user)})})
+  void app.auth.current().then(user=>{if(active&&!observed)void app.setUser(user)}).catch(error=>{if(active)app.reportError(error)})
   const refresh=()=>{if(document.visibilityState==='visible')void app.retry()}
   const online=()=>{if(app.scope!=='guest')app.sync?.setOnline(navigator.onLine)}
   window.addEventListener('focus',refresh);window.addEventListener('online',online);window.addEventListener('offline',online)
   const timer=setInterval(refresh,30000)
-  return()=>{unsubscribe();clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('online',online);window.removeEventListener('offline',online)}
+  return()=>{active=false;unsubscribe();clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('online',online);window.removeEventListener('offline',online)}
 }

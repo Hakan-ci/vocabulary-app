@@ -12,6 +12,12 @@ export function parseCache(raw: string|null): SyncCache {
   const value=JSON.parse(raw) as SyncCache
   if(value.version!==1||!value.base?.cells||!Number.isInteger(value.base.revision)||!value.identities?.localToCloud||!Number.isSafeInteger(value.identities.nextId)||!Array.isArray(value.queue)||!Array.isArray(value.backups))throw Error('Account cache could not be read. Your saved copy has not been overwritten.')
   if(value.queue.some(op=>!op.id||!Array.isArray(op.changes)||!['pending','conflict'].includes(op.status)))throw Error('Pending sync actions could not be read. Your saved copy has not been overwritten.')
+  const uuid=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
+  for(const map of [value.identities,value.migrationIdentities].filter(Boolean)) {
+    const pairs=Object.entries(map!.localToCloud)
+    if(map!.nextId<1_000_000||pairs.some(([id,ref])=>!Number.isSafeInteger(Number(id))||Number(id)<1_000_000||Number(id)>=map!.nextId||!uuid(ref))||new Set(pairs.map(([,ref])=>ref)).size!==pairs.length)throw Error('Account identities could not be read. The saved copy is preserved.')
+  }
+  if(Array.isArray(value.base.cells)||value.base.revision<0||typeof value.initialized!=='boolean'||value.migrationChoice!==undefined&&!['account','imported'].includes(value.migrationChoice)||value.queue.some(op=>!uuid(op.id)||!['vocabulary','delete','favorite','learned','preferences','start','draft','submit','assess','migration'].includes(op.kind)||op.changes.some(c=>typeof c.key!=='string'||!('before'in c)||!('after'in c))))throw Error('Invalid account cache. The saved copy is preserved.')
   return value
 }
 export class SyncService {

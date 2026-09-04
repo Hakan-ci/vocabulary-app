@@ -20,15 +20,25 @@ export function prepareMigration(data:AppData,account:Cells,map:IdentityMap,link
   const local=encodeData(data,map),cells={...account},conflicts:MigrationConflict[]=[]
   let additions=0
   // Unmapped device deletion markers must never delete unrelated account vocabulary.
-  for(const id of data.vocabulary.deletedIds){const ref=reference(id,map);if(!account[`word/${ref}`]&&!account[`deleted/${ref}`])delete local[`deleted/${ref}`]}
+  for(const id of data.vocabulary.deletedIds){const ref=reference(id,map);if(!account[`word/${ref}`]&&!account[`deleted/${ref}`]&&!local[`archived-word/${ref}`])delete local[`deleted/${ref}`]}
   for(const [key,device] of Object.entries(local)) {
     const remote=account[key]
     if(remote===undefined){cells[key]=device;additions++;continue}
     if(equal(device,remote))continue
     if(key==='activity/start'){const a=device as {startedAt:number},b=remote as {startedAt:number};cells[key]=a.startedAt<b.startedAt?device:remote;continue}
     const choice=choices[key]
-    if(!choice)conflicts.push({key,label:key,device:json(device),account:json(remote)})
+    if(!choice)conflicts.push({key,label:migrationLabel(key,local,account),device:json(device),account:json(remote)})
     else if(choice==='device')cells[key]=device
   }
   return {cells,conflicts,additions,historicalAnswers:(data.learning.session?.results.length??0)+(data.learning.reviewSession?.practice.results.length??0)}
+}
+
+function migrationLabel(key:string,device:Cells,account:Cells) {
+ const [kind,ref]=key.split('/'),word=device[`word/${ref}`]??account[`word/${ref}`]
+ const name=word&&typeof word==='object'&&!Array.isArray(word)&&typeof word.english==='string'?word.english:ref
+ const labels:Record<string,string>={word:'Vocabulary content',progress:'Learning history',favorite:'Favorites membership',suppressed:'Built-in visibility','archived-word':'Historical word'}
+ if(labels[kind])return `${labels[kind]}: ${name}`
+ if(kind==='session')return ref==='daily'?'Current Daily Test':'Current Review session'
+ if(kind==='activity')return ref==='undated'?'Undated historical activity':`Learning activity: ${ref}`
+ return key==='setting/goal'?'Daily goal':key==='setting/mode'?'Test direction':key
 }
