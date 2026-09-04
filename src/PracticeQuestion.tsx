@@ -1,11 +1,13 @@
+import {calculateDifficulty, directionalReviewDue, emptyWordHistory} from './learningHistory'
+import type {LearningHistory} from './learningHistory'
 import { useEffect, useRef, useState } from 'react'
 import type { VocabularyWord } from './vocabulary'
 import { questionContent } from './dailyTestModel'
 import type { TestSession } from './dailyTestModel'
 import { modeLabels } from './learningTypes'
 
-type Props = { catalog: readonly VocabularyWord[]; session: TestSession; label: 'Daily Test' | 'Review'; onDraft: (draft: string) => void; onSubmit: () => void; onAssess: (known: boolean) => void }
-export function PracticeQuestion({ catalog, session, label, onDraft, onSubmit, onAssess }: Props) {
+type Props = { history:LearningHistory; now:number; catalog: readonly VocabularyWord[]; session: TestSession; label: 'Daily Test' | 'Review'; onDraft: (draft: string) => void; onSubmit: () => void; onAssess: (known: boolean) => void }
+export function PracticeQuestion({ history, now, catalog, session, label, onDraft, onSubmit, onAssess }: Props) {
   const [validation, setValidation] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const feedbackRef = useRef<HTMLDivElement>(null)
@@ -15,11 +17,14 @@ export function PracticeQuestion({ catalog, session, label, onDraft, onSubmit, o
   }, [session.phase, session.index])
   const question = session.questions[session.index]
   const content = questionContent(question, catalog)
+  const h=history[question.wordId]??emptyWordHistory()
+  const difficulty=calculateDifficulty(h[question.direction],now)
   const correct = session.submittedCorrect
   return <section className="test-panel" aria-label={`${label} question`}>
     <div className="test-progress"><span>{label === 'Review' ? 'SPACED REVIEW' : 'DAILY PRACTICE'}</span><span aria-label="Question progress">{session.index + 1} / {session.questions.length}</span></div>
     <progress value={session.index} max={session.questions.length} aria-label="Completed questions" />
     <p className="test-mode-label">{modeLabels[question.direction]}</p>
+    <div className="practice-badges"><span>{difficulty.level}</span>{directionalReviewDue(h,question.direction,now)&&<span>Needs Review</span>}</div>
     <p className="test-prompt">What is the {content.answerLang === 'tr' ? 'Turkish' : 'English'} meaning of this word?</p>
     <h2 className="test-word" lang={content.sourceLang}>{content.prompt}</h2>
     {content.word.partOfSpeech && <span className="test-word-type">{content.word.partOfSpeech}</span>}

@@ -148,3 +148,12 @@ Review scheduling, queue ordering, and session validation live in `src/reviewMod
 Progress activity types, validation, and migration live in `src/activity.ts`; pure dashboard calculations in `src/progressModel.ts`; dashboard rendering in `src/Progress.tsx`. Tests cover zero/partial data, memberships, rankings, scoring, both sources, daily goals, calendar boundaries, streaks, one-time migration, malformed data, and persistence failures.
 
 Catalog querying and counts live in `src/catalogQuery.ts`; deletion eligibility, durable commits, and retryable cleanup in `src/vocabularyDeletion.ts`. Management tests cover combined filters, sorting, tags, blank import columns, creation dates, guarded deletion, failed writes, completed snapshots, and unchanged activity totals.
+
+
+## Installable app and mobile reliability
+
+Kelime now precaches its production app shell and lazy screens, offers optional installation in Account/More, and prompts before applying updates. Below 768px, bottom navigation replaces the sidebar; More contains Favorites, Learned, Account and Install. Practice offers saved-session continuation and confirmed archival/restart.
+
+Account caches/outboxes migrate transactionally to IndexedDB while retaining the original localStorage recovery copies. Guest storage stays unchanged. Protocol-2 SQL merges distinct assessment events exactly once and preserves separate UUID sessions. Apply `002_events.sql` after `001_kelime.sql` before using cloud synchronization with this client; no live project was modified by this implementation.
+
+See [PWA_SETUP.md](PWA_SETUP.md) for installation, offline testing, icon regeneration, hosting headers, SQL rollout, automated verification and physical-device checks. Run `npm run build` then `npm run test:browser` for production-browser verification (`msedge` channel by default). Run `npm run icons` after changing the source SVG.

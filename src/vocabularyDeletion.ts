@@ -6,10 +6,11 @@ type StorageAccess = Pick<Storage, 'getItem' | 'setItem'>
 
 export function deletionBlock(id: number, state: LearningState): string | null {
   const sessions = [
+    ...Object.values(state.sessions??{}).filter(r=>!r.archivedAt&&r.practice.phase!=='completed'&&r.practice.questions.some(q=>q.wordId===id)).map(r=>r.source==='daily'?'Daily Test':'Review'),
     ...(state.session && state.session.phase !== 'completed' && state.session.questions.some(q => q.wordId === id) ? ['Daily Test'] : []),
     ...(state.reviewSession && state.reviewSession.practice.phase !== 'completed' && state.reviewSession.practice.questions.some(q => q.wordId === id) ? ['Review'] : []),
   ]
-  return sessions.length ? `Finish ${sessions.join(' and ')} before deleting this word.` : null
+  return sessions.length ? `Finish ${[...new Set(sessions)].join(' and ')} before deleting this word.` : null
 }
 export function removeDeletedHistory(state: LearningState, ids: readonly number[]): LearningState {
   return { ...state, history: Object.fromEntries(Object.entries(state.history).filter(([id]) => !ids.includes(Number(id)))) }

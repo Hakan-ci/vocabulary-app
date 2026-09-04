@@ -1,3 +1,4 @@
+import type {LearningHistory} from './learningHistory'
 import { WordTags } from './WordTags'
 import { primaryMeaning } from './wordFields'
 import { useEffect, useRef, useState } from 'react'
@@ -7,9 +8,9 @@ import { sessionSummary } from './dailyTestModel'
 import { modeLabels } from './learningTypes'
 import { PracticeQuestion } from './PracticeQuestion'
 
-type Props = { catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; onStart: () => void; onDraft: (draft: string) => void; onSubmit: () => void; onAssess: (known: boolean) => void }
+type Props = { history: LearningHistory; now:number; catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; onStart: () => void; onDraft: (draft: string) => void; onSubmit: () => void; onAssess: (known: boolean) => void }
 const groups: ReviewGroup[] = ['Needs Review', 'Overdue', 'Due today', 'Next scheduled reviews']
-export function Review({ catalog, queue, session, onStart, onDraft, onSubmit, onAssess }: Props) {
+export function Review({ history, now, catalog, queue, session, onStart, onDraft, onSubmit, onAssess }: Props) {
   const [showPractice, setShowPractice] = useState(true)
   const summaryRef = useRef<HTMLHeadingElement>(null)
   const practice = session?.practice
@@ -18,7 +19,7 @@ export function Review({ catalog, queue, session, onStart, onDraft, onSubmit, on
   useEffect(() => { if (practice?.phase === 'completed') summaryRef.current?.focus() }, [practice?.phase])
   if (active && showPractice) return <div className="review-page">
     <button className="secondary-button review-back" onClick={() => setShowPractice(false)}>Back to queue</button>
-    <PracticeQuestion catalog={catalog} session={practice} label="Review" onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
+    <PracticeQuestion history={history} now={now} catalog={catalog} session={practice} label="Review" onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
   </div>
   const summary = practice?.phase === 'completed' ? sessionSummary(practice, catalog) : null
   const pairs = (ids: number[]) => <ul className="learned-summary">{ids.map(id => {

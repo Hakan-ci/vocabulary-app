@@ -79,3 +79,10 @@ These checks require a configured disposable project and remain a deployment gat
 - Delete a personal word after completing its practice sessions. Confirm device 2 receives the tombstone and cannot resurrect it from an old cache; historical scores and snapshots remain. Attempt deletion during an unfinished remote session and confirm rejection.
 - Sign out of A with pending changes and sign into B. Confirm A's actions remain isolated and resume only for A. Guest vocabulary must remain unchanged.
 - Check Account, import previews and practice at desktop, 390px and 320px, including keyboard focus, notices and retries. Verify storage-quota failures retain an explicit refresh-loss warning.
+
+
+## Protocol 2 / PWA rollout
+
+Apply `supabase/migrations/002_events.sql` **after** migration 001; existing installations must not rerun 001. The added RPCs `kelime_snapshot_v2` and `kelime_apply_v2` retain ownership/RLS and transactional receipts, add ordered assessment events, and preserve UUID-addressed sessions and archives. Existing history/activity remains the baseline. The first v2 write upgrades the account and blocks older snapshot writers under the same profile lock. Pending legacy operations remain locally recoverable; ambiguous assessments require conflict review.
+
+Run `npm run db:types` to regenerate TypeScript rows from both executable migrations. `npm test` executes SQL and event scenarios in embedded PostgreSQL without reading `.env.local` or contacting a live project. See [PWA_SETUP.md](PWA_SETUP.md) for IndexedDB migration, acceptance ordering, offline behavior, SQL rollout and the two-device/live authentication checklist. Production offline tests use `npm run build` followed by `npm run test:browser`.

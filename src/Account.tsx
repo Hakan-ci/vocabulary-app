@@ -1,3 +1,4 @@
+import { InstallButton } from './Pwa'
 import { useState } from 'react'
 import type { Application } from './data/application'
 export function Account({app}:{app:Application}) {
@@ -5,9 +6,10 @@ export function Account({app}:{app:Application}) {
   const run=async(action:()=>Promise<unknown>)=>{setBusy(true);setMessage('');try{const result=await action();if(typeof result==='string')setMessage(result)}catch(e){setMessage(e instanceof Error?e.message:'Please try again.')}finally{setBusy(false)}}
   const preview=app.previewOpen?app.preview:null
   return <section className="test-panel account-panel" aria-label="Account">
-    <h2>Your learning, wherever you go.</h2>
-    {!app.configured?<p>Synchronization is not configured yet. Your vocabulary and practice continue locally. Follow SUPABASE_SETUP.md to connect a project.</p>:!app.user?<>
-      <p>Sign in to synchronize your vocabulary and progress. You can also keep using this device locally.</p>
+    <h2>Your learning, wherever you go.</h2><InstallButton/>
+    {!app.configured?<p>Synchronization is not configured yet. Your vocabulary and practice continue locally. Follow SUPABASE_SETUP.md to connect a project.</p>:!app.user||!app.authenticated?<>
+      <p>{app.user?'Your cached account is available offline. Sign in again to resume synchronization.':''}</p><p>Sign in to synchronize your vocabulary and progress. You can also keep using this device locally.</p>
+      {app.user&&<button className="secondary-button" onClick={()=>void run(()=>app.auth.signOut())}>Sign out of cached account</button>}
       <form onSubmit={e=>{e.preventDefault();void run(()=>signup?app.auth.signUp(email,password):app.auth.signIn(email,password))}}>
         <label>Email<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label>
         <label>Password<input type="password" autoComplete={signup?'new-password':'current-password'} required minLength={6} value={password} onChange={e=>setPassword(e.target.value)}/></label>

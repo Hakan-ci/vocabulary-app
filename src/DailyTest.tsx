@@ -1,3 +1,4 @@
+import type {LearningHistory} from './learningHistory'
 import { primaryMeaning } from './wordFields'
 import { useEffect, useRef } from 'react'
 import type { VocabularyWord } from './vocabulary'
@@ -9,6 +10,8 @@ import { PracticeQuestion } from './PracticeQuestion'
 import { DirectionSetting } from './DirectionSetting'
 
 type Props = {
+  history: LearningHistory
+  now: number
   catalog: readonly VocabularyWord[]
   mode: TestMode
   onModeChange: (mode: TestMode) => void
@@ -20,7 +23,7 @@ type Props = {
   onLearned: () => void
 }
 
-export function DailyTest({ catalog, mode, onModeChange, session, onStart, onDraft, onSubmit, onAssess, onLearned }: Props) {
+export function DailyTest({ history, now, catalog, mode, onModeChange, session, onStart, onDraft, onSubmit, onAssess, onLearned }: Props) {
   const summaryRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (session?.phase === 'completed') summaryRef.current?.focus()
@@ -75,5 +78,5 @@ export function DailyTest({ catalog, mode, onModeChange, session, onStart, onDra
     </section>
   }
 
-  return <PracticeQuestion catalog={catalog} session={session} label="Daily Test" onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
+  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
 }

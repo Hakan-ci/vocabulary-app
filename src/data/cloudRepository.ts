@@ -8,6 +8,6 @@ function snapshot(value:unknown,owner:string):CloudSnapshot {
   return {revision:result.revision,cells:result.cells}
 }
 export function cloudRepository(owner:string):CloudTransport {return {
-  async pull(){if(!supabase)throw Error('Supabase is not configured.');const {data,error}=await supabase.rpc('kelime_snapshot',{});if(error)throw error;return snapshot(data,owner)},
-  async push(operation){if(!supabase)throw Error('Supabase is not configured.');const {data,error}=await supabase.rpc('kelime_apply',{p_operation:json({...operation,accountId:owner})});if(error){if(['P0001','23505','23514'].includes(error.code))return {conflict:true,message:error.message,snapshot:await this.pull()};throw error}const result=data as unknown as {conflict:boolean;snapshot:unknown;message?:string};return {...result,snapshot:snapshot(result.snapshot,owner)}},
+  async pull(){if(!supabase)throw Error('Supabase is not configured.');const {data,error}=await supabase.rpc('kelime_snapshot_v2',{});if(error)throw error;return snapshot(data,owner)},
+  async push(operation){if(!supabase)throw Error('Supabase is not configured.');const {data,error}=await supabase.rpc('kelime_apply_v2',{p_operation:json({...operation,accountId:owner})});if(error){if(['P0001','23505','23514'].includes(error.code))return {conflict:true,message:error.message,snapshot:await this.pull()};throw error}const result=data as unknown as {conflict:boolean;snapshot:unknown;message?:string};return {...result,snapshot:snapshot(result.snapshot,owner)}},
 }}

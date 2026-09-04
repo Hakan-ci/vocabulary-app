@@ -13,7 +13,7 @@ import { selectQuestions } from './adaptiveSelection.ts'
 import type { TestQuestion } from './adaptiveSelection.ts'
 export type { TestQuestion } from './adaptiveSelection.ts'
 export type QuestionSnapshot = TestQuestion & { snapshot: { word: VocabularyWord; prompt: string; acceptedAnswers: string[]; rule: MatchingRule } }
-export type TestResult = QuestionSnapshot & { answer: string; known: boolean; correct: boolean; answeredAt?: number | null; activityDate?: string | null }
+export type TestResult = QuestionSnapshot & { answer: string; known: boolean; correct: boolean; eventId?: string; answeredAt?: number | null; activityDate?: string | null }
 export type CompletionSnapshot = {
   needsReviewIds: number[]
   hardest: (TestQuestion & Difficulty)[]
@@ -76,7 +76,7 @@ export function assessAnswer(session: TestSession, history: LearningHistory, kno
   const nextHistory = { ...history, [question.wordId]: recordAssessment(previous, known, now, question.direction) }
   const completed = index === session.questions.length
   const next: TestSession = { ...session, completedAt: completed ? now : null, index, phase: completed ? 'completed' : 'answering', draft: '', submittedAnswer: '', submittedCorrect: null,
-    results: [...session.results, { ...question, answer: session.submittedAnswer, known, correct: session.submittedCorrect!, answeredAt: now, activityDate: localDate(now) }],
+    results: [...session.results, { ...question, answer: session.submittedAnswer, known, correct: session.submittedCorrect!, eventId: crypto.randomUUID(), answeredAt: now, activityDate: localDate(now) }],
     newlyLearnedIds: added ? [...new Set([...session.newlyLearnedIds, question.wordId])] : session.newlyLearnedIds,
     completion: completed ? completionSnapshot(session.questions, nextHistory, now) : null }
   return { session: next, history: nextHistory }
@@ -114,7 +114,7 @@ export function parseSession(value: unknown, catalog: readonly VocabularyWord[] 
   } else {
     snapshots = questions.map(q => snapshotQuestion(q, legacyCatalog.some(w => w.id === q.wordId) ? legacyCatalog : catalog, () => 0, 'legacy'))
   }
-  const results: TestResult[] = raw.results.map((r, i) => ({ ...snapshots[i], answer: r.answer, known: r.known, correct: raw.version === 4 ? r.correct : questionMatches(r.answer, snapshots[i]), ...(r.answeredAt !== undefined ? {answeredAt: creationTime(r.answeredAt)} : {}), ...(typeof r.activityDate === 'string' ? {activityDate:r.activityDate} : {}) }))
+  const results: TestResult[] = raw.results.map((r, i) => ({ ...snapshots[i], answer: r.answer, known: r.known, correct: raw.version === 4 ? r.correct : questionMatches(r.answer, snapshots[i]), ...(typeof r.eventId === 'string' ? {eventId:r.eventId} : {}), ...(r.answeredAt !== undefined ? {answeredAt: creationTime(r.answeredAt)} : {}), ...(typeof r.activityDate === 'string' ? {activityDate:r.activityDate} : {}) }))
   const submittedCorrect = raw.phase === 'feedback' ? raw.version === 4 ? raw.submittedCorrect as boolean : questionMatches(raw.submittedAnswer, snapshots[Number(raw.index)]) : null
 
   if (!validSubset(raw.newlyLearnedIds, results.filter(r => r.known).map(r => r.wordId))) return null

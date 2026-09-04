@@ -11,7 +11,8 @@ import type { LearningHistory } from './learningHistory.ts'
 import { isTestMode } from './learningTypes.ts'
 import type { TestMode } from './learningTypes.ts'
 
-export type LearningState = { version: 5; preferredMode: TestMode; history: LearningHistory; session: TestSession | null; reviewSession: ReviewSession | null; dailyGoal: number; activity: Activity }
+export type StoredPractice = {source:'daily'|'review';practice:TestSession;archivedAt?:number}
+export type LearningState = { version: 5; sessions?:Record<string,StoredPractice>; preferredMode: TestMode; history: LearningHistory; session: TestSession | null; reviewSession: ReviewSession | null; dailyGoal: number; activity: Activity }
 export const LEARNING_STATE_KEY = 'kelime-learning-state'
 export const emptyLearningState = (catalog: readonly VocabularyWord[] = words, now = Date.now()): LearningState => ({ version: 5, preferredMode: 'englishToTurkish', history: emptyHistory(catalog), session: null, reviewSession: null, dailyGoal: 10, activity: emptyActivity(now) })
 
@@ -20,7 +21,15 @@ export function parseLearningState(value: unknown, catalog: readonly VocabularyW
   const state = value as LearningState
   const session = parseSession(state.session, catalog, false, legacyCatalog, deletedIds)
   const reviewSession = Number(state.version) >= 3 ? parseReviewSession(state.reviewSession, catalog, legacyCatalog, deletedIds) : null
-  return { version: 5, preferredMode: isTestMode(state.preferredMode) ? state.preferredMode : 'englishToTurkish', history: parseHistory(state.history, Number(state.version) === 1, catalog), session, reviewSession,
+  const sessions:Record<string,StoredPractice>={}
+  for(const [id,record] of Object.entries(state.sessions??{})) {
+    if(!record||!['daily','review'].includes(record.source)||record.practice?.syncId!==id)continue
+    const archived=typeof record.archivedAt==='number'&&Number.isFinite(record.archivedAt)
+    const deleted=archived?(Array.isArray(record.practice.questions)?record.practice.questions:[]).filter(q=>deletedIds.includes(q.wordId)).map(q=>q.snapshot?.word).filter(Boolean):[]
+    const practice=parseSession(record.practice,[...catalog,...deleted],record.source==='review',legacyCatalog,deletedIds)
+    if(practice)sessions[id]={source:record.source,practice,...(archived?{archivedAt:record.archivedAt}:{})}
+  }
+  return { version: 5, ...(state.sessions?{sessions}:{}), preferredMode: isTestMode(state.preferredMode) ? state.preferredMode : 'englishToTurkish', history: parseHistory(state.history, Number(state.version) === 1, catalog), session, reviewSession,
     dailyGoal: goals.some(goal => goal === state.dailyGoal) ? state.dailyGoal : 10,
     activity: Number(state.version) >= 4 ? parseActivity(state.activity, now) : migrateActivity(session, reviewSession?.practice ?? null, catalog, now) }
 

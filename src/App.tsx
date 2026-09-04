@@ -1,3 +1,7 @@
+import { PracticeResume } from './PracticeResume'
+import { PwaProvider, UpdateNotice } from './Pwa'
+import { MobileNavigation } from './MobileNavigation'
+import { ScreenBoundary } from './ScreenBoundary'
 import { CatalogControls } from './CatalogControls'
 import { WordTags } from './WordTags'
 import { DeleteVocabulary } from './DeleteVocabulary'
@@ -8,22 +12,22 @@ import { Meanings } from './Meanings'
 import type { WordEntry } from './wordFields'
 import type { VocabularyWord } from './vocabulary'
 import { primaryMeaning } from './wordFields'
-import { Progress } from './Progress'
+const Progress = lazy(() => import('./Progress').then(module => ({default:module.Progress})))
 import { dashboard } from './progressModel'
 import { goals } from './activity'
-import { Review } from './Review'
+const Review = lazy(() => import('./Review').then(module => ({default:module.Review})))
 import { reviewQueue, createReviewSession } from './reviewModel'
 import { assessReviewState } from './learningState'
-import { AddVocabulary } from './AddVocabulary'
+const AddVocabulary = lazy(() => import('./AddVocabulary').then(module => ({default:module.AddVocabulary})))
 import type { EntryMode } from './AddVocabulary'
 import { combinedCatalog } from './userVocabulary'
 import type { ImportRow } from './vocabularyImport'
-import { useState, useEffect, useSyncExternalStore } from 'react'
-import { Account } from './Account'
+import { useState, useEffect, useSyncExternalStore, lazy, Suspense } from 'react'
+const Account = lazy(() => import('./Account').then(module => ({default:module.Account})))
 import { application, connectApplication } from './data/application'
 import type { Application } from './data/application'
 import './App.css'
-import { DailyTest } from './DailyTest'
+const DailyTest = lazy(() => import('./DailyTest').then(module => ({default:module.DailyTest})))
 import { createSession, submitAnswer } from './dailyTestModel'
 import { assessLearningState } from './learningState'
 import { learnedIds, learningStatus, removeFromLearned } from './learningHistory'
@@ -46,7 +50,7 @@ function App() {
 }
 export function ApplicationView({app}: {app: Application}) {
   useSyncExternalStore(app.subscribe, app.getSnapshot)
-  return <Workspace key={app.scope} app={app} />
+  return <PwaProvider><Workspace key={app.scope} app={app} /></PwaProvider>
 }
 function Workspace({app}: {app: Application}) {
   const [view, setView] = useState<'all' | 'favorites' | 'test' | 'review' | 'learned' | 'progress' | 'account'>('all')
@@ -147,6 +151,7 @@ function Workspace({app}: {app: Application}) {
   const emptyCollection = (view === 'favorites' && !favorites.length) || (view === 'learned' && !learned.length)
   const changeView = (next: typeof view) => { setView(next); clearFilters(); clock.refresh() }
   return <div className="app-shell">
+    <MobileNavigation view={view} onChange={changeView} reviewCount={reviewCount} />
     {deletingWord && <DeleteVocabulary word={deletingWord} onCancel={()=>setDeletingWord(null)} onDelete={deleteWord} />}
     <aside className="sidebar">
       <a href="#" className="brand" onClick={() => changeView('all')} aria-label="Kelime home"><span className="brand-mark"><Icon name="book" size={23} /></span>kelime<span className="brand-dot">.</span></a>
@@ -165,10 +170,14 @@ function Workspace({app}: {app: Application}) {
     <div className="main-shell">
       <header className="topbar"><button className="sync-indicator" onClick={() => changeView('account')} aria-label={`Account: ${app.status}`}>{app.status}</button><div className="course"><span className="status-dot" /> English <span>→</span> <span lang="tr">Türkçe</span></div></header>
       <main>
+        <UpdateNotice blocked={entryMode!==null||!!storageError} save={()=>app.ensureSaved()} />
+        {app.networkNotice && <p className="network-notice" role="status">{app.networkNotice}</p>}
+        <ScreenBoundary key={view}><Suspense fallback={<p role="status" className="test-panel">Loading your learning space…</p>}>
         <section className="intro"><div className="eyebrow">WORDS OPEN WORLDS</div><h1>{view === 'account' ? 'Your personal learning space.' : view === 'progress' ? 'See how far you’ve come.' : view === 'review' ? 'Keep good words close.' : view === 'test' ? 'A little practice. Lasting progress.' : view === 'learned' ? 'Look how far you’ve come.' : view === 'all' ? 'A new word. A new possibility.' : 'Good words, worth keeping.'}</h1><p>{view === 'account' ? 'Keep your words close, on every device.' : view === 'progress' ? 'Small moments of practice, meaningful progress.' : view === 'review' ? 'A timely review makes a lasting memory.' : view === 'test' ? 'Recall, reflect, and make each word your own.' : view === 'learned' ? 'The words you know, ready to revisit whenever you like.' : view === 'all' ? 'Build your English vocabulary, one little discovery at a time.' : 'Your personal collection. Come back, revisit, and make them yours.'}</p></section>
         {storageError && <p className="storage-notice" role="status">Your browser couldn’t read or save some learning data. You can keep practicing, but changes may not survive a refresh.</p>}
         {app.migrationOpen && view !== 'account' && <p className="storage-notice">We found learning data on this device. <button className="secondary-button" onClick={() => changeView('account')}>Review synchronization options</button></p>}
-        {view === 'account' ? <Account app={app} /> : view === 'progress' ? <Progress data={dashboard(words, history, favorites, learningStore.value.activity, clock.now)} goal={learningStore.value.dailyGoal} onGoal={setGoal} onReview={() => changeView('review')} /> : view === 'review' ? <Review catalog={words} queue={queue} session={learningStore.value.reviewSession} onStart={startReview} onDraft={reviewDraft} onSubmit={reviewSubmit} onAssess={reviewAssess} /> : view === 'test' ? <DailyTest catalog={words} mode={learningStore.value.preferredMode} onModeChange={setMode} session={session} onStart={startTest} onDraft={updateDraft} onSubmit={submit} onAssess={assess} onLearned={() => changeView('learned')} /> : <>
+        {(view==='test'||view==='review')&&app.isProvisional(view==='test'?'daily':'review')&&<p className="network-notice">These results are provisional until synchronization finishes.</p>}
+        {view === 'account' ? <Account app={app} /> : view === 'progress' ? <Progress data={dashboard(words, history, favorites, learningStore.value.activity, clock.now)} goal={learningStore.value.dailyGoal} onGoal={setGoal} onReview={() => changeView('review')} /> : view === 'review' ? <PracticeResume key="review" app={app} source="review" onStart={startReview}><Review history={history} now={clock.now} catalog={words} queue={queue} session={learningStore.value.reviewSession} onStart={startReview} onDraft={reviewDraft} onSubmit={reviewSubmit} onAssess={reviewAssess} /></PracticeResume> : view === 'test' ? <PracticeResume key="daily" app={app} source="daily" onStart={startTest}><DailyTest history={history} now={clock.now} catalog={words} mode={learningStore.value.preferredMode} onModeChange={setMode} session={session} onStart={startTest} onDraft={updateDraft} onSubmit={submit} onAssess={assess} onLearned={() => changeView('learned')} /></PracticeResume> : <>
         <section className="featured" aria-label="Featured word"><div className="featured-copy"><div className="featured-label"><span>✧</span> A WORD TO INSPIRE YOU</div><div className="featured-word">Discover <span>verb</span></div><div className="featured-translation" lang="tr">Keşfetmek</div><p>“There is always something new to discover.”</p></div><div className="word-art" aria-hidden="true"><span className="art-spark spark-one">✧</span><div className="art-card art-back"><span>Merhaba</span><small>A world of possibilities</small></div><div className="art-card art-front"><Icon name="leaf" size={26} /><span>Hello<span className="art-dot">.</span></span><small>It starts with a word.</small></div><span className="art-spark spark-two">✦</span></div></section>
         <section className="vocabulary" aria-labelledby="vocabulary-heading">
           <div className="section-heading"><div><h2 id="vocabulary-heading">{view === 'learned' ? 'Your learned words' : view === 'all' ? 'Your vocabulary' : 'Your favorites'} <span>{view === 'all' ? words.length : view === 'learned' ? learned.length : favorites.length}</span></h2><p>{view === 'all' ? 'Explore, save, and make these words your own.' : 'A little collection for your next learning moment.'}</p></div>{view === 'all' && <div className="entry-actions"><button className="secondary-button" onClick={() => { setEditingWord(undefined); setEntryMode('single'); setImportNotice('') }}>Add Word</button><button className="primary-button" onClick={() => { setEditingWord(undefined); setEntryMode('bulk'); setImportNotice('') }}>Bulk Add</button></div>}</div>
@@ -188,6 +197,7 @@ function Workspace({app}: {app: Application}) {
           </div>}
         </section>
         </>}
+        </Suspense></ScreenBoundary>
         <footer><span>Made for curious minds.</span><span>One word closer, every day. <Icon name="leaf" size={14} /></span></footer>
       </main>
     </div>

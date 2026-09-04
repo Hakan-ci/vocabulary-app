@@ -30,7 +30,7 @@ function mapSnapshot(value: unknown,map: IdentityMap,encode: boolean,key=''): un
 export function encodeData(data: AppData,map: IdentityMap): Cells {
   const cells: Cells={}
   for(const word of [...data.vocabulary.entries,...Object.values(data.vocabulary.overrides)])cells[`word/${reference(word.id,map)}`]=json({...word,id:reference(word.id,map)})
-  for(const session of [data.learning.session,data.learning.reviewSession?.practice])if(session?.phase==='completed')for(const q of session.questions)if(data.vocabulary.deletedIds.includes(q.wordId))cells[`archived-word/${reference(q.wordId,map)}`]=json({...q.snapshot.word,id:reference(q.wordId,map)})
+  for(const session of [data.learning.session,data.learning.reviewSession?.practice,...Object.values(data.learning.sessions??{}).filter(r=>r.archivedAt).map(r=>r.practice)])if(session)for(const q of session.questions)if(data.vocabulary.deletedIds.includes(q.wordId))cells[`archived-word/${reference(q.wordId,map)}`]=json({...q.snapshot.word,id:reference(q.wordId,map)})
   for(const id of data.vocabulary.deletedIds)cells[`deleted/${reference(id,map)}`]=true
   for(const id of data.vocabulary.suppressedBuiltinIds)cells[`suppressed/b:${id}`]=true
   for(const [id,h] of Object.entries(data.learning.history))if(!equal(h,emptyWordHistory()))cells[`progress/${reference(Number(id),map)}`]=json(h)
@@ -39,6 +39,7 @@ export function encodeData(data: AppData,map: IdentityMap): Cells {
   cells['activity/start']=json({startedAt:data.learning.activity.startedAt,startedDate:data.learning.activity.startedDate})
   cells['activity/undated']=json(data.learning.activity.undated)
   for(const [day,bucket] of Object.entries(data.learning.activity.days))cells[`activity/${day}`]=json(bucket)
+  for(const [id,record] of Object.entries(data.learning.sessions??{}))cells[`session-record/${id}`]=json(mapSnapshot(record,map,true))
   if(data.learning.session)cells['session/daily']=json(mapSnapshot(data.learning.session,map,true))
   if(data.learning.reviewSession)cells['session/review']=json(mapSnapshot(data.learning.reviewSession,map,true))
   return cells
@@ -57,6 +58,7 @@ export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppDat
   vocabulary.entries=vocabulary.entries.filter(w=>!vocabulary.deletedIds.includes(w.id));vocabulary.nextId=map.nextId
   const catalog=combinedCatalog(vocabulary),initial=emptyLearningState(catalog,now)
   const start=cells['activity/start'] as {startedAt:number;startedDate:string}|undefined
-  const learning=parseLearningState({...initial,history,preferredMode:cells['setting/mode']??initial.preferredMode,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,vocabulary.deletedIds)
+  const sessions=Object.fromEntries(Object.entries(cells).filter(([key])=>key.startsWith('session-record/')).map(([key,v])=>[key.slice(15),mapSnapshot(v,map,false)]))
+  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,vocabulary.deletedIds)
   return {vocabulary,learning,favorites:favorites.filter(id=>catalog.some(w=>w.id===id))}
 }

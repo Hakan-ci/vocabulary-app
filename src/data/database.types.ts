@@ -25,6 +25,42 @@ export type Database = { public: { Tables: {
     }
     Relationships: []
   }
+  assessment_events: {
+    Row: {
+      user_id: string
+      id: string
+      session_id: string
+      question_index: number
+      operation_id: string
+      accepted_order: number
+      recorded_at: string | null
+      activity_date: string | null
+      payload: Json
+    }
+    Insert: {
+      user_id: string
+      id: string
+      session_id: string
+      question_index: number
+      operation_id: string
+      accepted_order: number
+      recorded_at?: string | null
+      activity_date?: string | null
+      payload: Json
+    }
+    Update: {
+      user_id?: string
+      id?: string
+      session_id?: string
+      question_index?: number
+      operation_id?: string
+      accepted_order?: number
+      recorded_at?: string | null
+      activity_date?: string | null
+      payload?: Json
+    }
+    Relationships: []
+  }
   builtin_overrides: {
     Row: {
       user_id: string
@@ -159,16 +195,19 @@ export type Database = { public: { Tables: {
       id: string
       created_at: string
       revision: number
+      sync_protocol: number
     }
     Insert: {
       id: string
       created_at?: string
       revision?: number
+      sync_protocol?: number
     }
     Update: {
       id?: string
       created_at?: string
       revision?: number
+      sync_protocol?: number
     }
     Relationships: []
   }
@@ -238,6 +277,7 @@ export type Database = { public: { Tables: {
       state: Json
       updated_at: string
       revision: number
+      archived_at: string | null
     }
     Insert: {
       id: string
@@ -253,6 +293,7 @@ export type Database = { public: { Tables: {
       state: Json
       updated_at?: string
       revision?: number
+      archived_at?: string | null
     }
     Update: {
       id?: string
@@ -268,6 +309,7 @@ export type Database = { public: { Tables: {
       state?: Json
       updated_at?: string
       revision?: number
+      archived_at?: string | null
     }
     Relationships: []
   }
@@ -317,6 +359,8 @@ export type Database = { public: { Tables: {
     Relationships: []
   }
 }; Views: Record<string,never>; Functions: {
+ kelime_snapshot_v2: { Args: Record<string,never>; Returns: Json }
+ kelime_apply_v2: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot: { Args: Record<string,never>; Returns: Json }
  kelime_apply: { Args: { p_operation: Json }; Returns: Json }
 }; Enums: Record<string,never>; CompositeTypes: Record<string,never> } }
