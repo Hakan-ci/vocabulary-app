@@ -131,7 +131,7 @@ Each assessment saves history, session advancement, and activity in one write. D
 
 ## Storage and compatibility
 
-`kelime-favorites` remains unchanged. Version 5 of `kelime-learning-state` stores history, direction preference, the version 4 Daily Test session, the independent version 2 Review session, daily goal, and compact activity aggregates together. Existing records migrate without replacing either session or activity totals. Original vocabulary is retained for legacy session migration. Each self-assessment saves history and question advancement in one write.
+`kelime-favorites` remains unchanged. Version 6 of `kelime-learning-state` stores history, direction and pronunciation preferences, the version 4 Daily Test session, the independent version 2 Review session, daily goal, and compact activity aggregates together. Existing records migrate without replacing either session or activity totals. Original vocabulary is retained for legacy session migration. Each self-assessment saves history and question advancement in one write.
 
 Older recorded history migrates into English → Turkish statistics, since that was the only original direction. Reverse statistics start at zero. Legacy Learned membership without recorded attempts remains intact and is immediately review-eligible in English → Turkish without inventing counts or dates. Old sessions retain their words, drafts, feedback, results, and newly learned IDs; their directions become English → Turkish. Old summaries show unavailable historical difficulty/review snapshots explicitly.
 
@@ -152,6 +152,8 @@ Vocabulary lives in `src/vocabulary.ts`. Shared direction/statistics types live 
 Import parsing and preview classification live in `src/vocabularyImport.ts`; user catalog validation and write-first persistence in `src/userVocabulary.ts`; both forms in `src/AddVocabulary.tsx`. Import tests cover delimiters, malformed rows, duplicate promotion, stable IDs, failed writes, and imported questions through restoration and summaries in all modes.
 
 Review scheduling, queue ordering, and session validation live in `src/reviewModel.ts`. `src/PracticeQuestion.tsx` shares the answer flow between Daily Test and Review. Review tests cover interval boundaries, queue grouping, variable sizes, directional selection, imported IDs, session independence, migration, duplicate events, retries, and frozen summaries.
+
+Pronunciation uses the browser Web Speech API through one controller and React provider. Speaker controls are available on vocabulary cards and the single-word editor. English→Turkish practice speaks the frozen English prompt; Turkish→English practice reveals and speaks the frozen primary English answer only after submission. Automatic pronunciation defaults on and can be changed in Account or practice setup. It does not alter scoring, history, activity, or vocabulary records. Unsupported browsers hide speaker buttons and show a small availability note in settings.
 
 Progress activity types, validation, and migration live in `src/activity.ts`; pure dashboard calculations in `src/progressModel.ts`; dashboard rendering in `src/Progress.tsx`. Tests cover zero/partial data, memberships, rankings, scoring, both sources, daily goals, calendar boundaries, streaks, one-time migration, malformed data, and persistence failures.
 

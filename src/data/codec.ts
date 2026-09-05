@@ -36,7 +36,7 @@ export function encodeData(data: AppData,map: IdentityMap): Cells {
   for(const id of data.vocabulary.hiddenBuiltinIds){cells[`hidden/b:${id}`]=true;const archived=data.vocabulary.hiddenBuiltinState[id];if(archived)cells[`hidden-state/b:${id}`]=json(archived)}
   for(const [id,h] of Object.entries(data.learning.history))if(!equal(h,emptyWordHistory()))cells[`progress/${reference(Number(id),map)}`]=json(h)
   for(const id of data.favorites)cells[`favorite/${reference(id,map)}`]=true
-  cells['setting/goal']=data.learning.dailyGoal;cells['setting/mode']=data.learning.preferredMode
+  cells['setting/goal']=data.learning.dailyGoal;cells['setting/mode']=data.learning.preferredMode;cells['setting/auto-pronunciation']=data.learning.autoPronunciation
   cells['activity/start']=json({startedAt:data.learning.activity.startedAt,startedDate:data.learning.activity.startedDate})
   cells['activity/undated']=json(data.learning.activity.undated)
   for(const [day,bucket] of Object.entries(data.learning.activity.days))cells[`activity/${day}`]=json(bucket)
@@ -63,6 +63,6 @@ export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppDat
   const start=cells['activity/start'] as {startedAt:number;startedDate:string}|undefined
   const sessions=Object.fromEntries(Object.entries(cells).filter(([key])=>key.startsWith('session-record/')).map(([key,v])=>[key.slice(15),mapSnapshot(v,map,false)]))
   const unavailable=[...vocabulary.deletedIds,...vocabulary.hiddenBuiltinIds]
-  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,unavailable)
+  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,autoPronunciation:typeof cells['setting/auto-pronunciation']==='boolean'?cells['setting/auto-pronunciation']:true,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,unavailable)
   return {vocabulary,learning,favorites:favorites.filter(id=>catalog.some(w=>w.id===id))}
 }

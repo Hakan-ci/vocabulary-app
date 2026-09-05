@@ -8,6 +8,7 @@ import { modeLabels } from './learningTypes'
 import type { TestMode } from './learningTypes'
 import { PracticeQuestion } from './PracticeQuestion'
 import { DirectionSetting } from './DirectionSetting'
+import { AutoPronunciationSetting } from './Pronunciation'
 
 type Props = {
   history: LearningHistory
@@ -15,6 +16,8 @@ type Props = {
   catalog: readonly VocabularyWord[]
   mode: TestMode
   onModeChange: (mode: TestMode) => void
+  autoPronunciation: boolean
+  onAutoPronunciationChange: (value: boolean) => void
   session: TestSession | null
   onStart: () => void
   onDraft: (value: string) => void
@@ -23,7 +26,7 @@ type Props = {
   onLearned: () => void
 }
 
-export function DailyTest({ history, now, catalog, mode, onModeChange, session, onStart, onDraft, onSubmit, onAssess, onLearned }: Props) {
+export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, onDraft, onSubmit, onAssess, onLearned }: Props) {
   const summaryRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (session?.phase === 'completed') summaryRef.current?.focus()
@@ -36,6 +39,7 @@ export function DailyTest({ history, now, catalog, mode, onModeChange, session, 
     <p>Practice in either direction, then decide how well you knew each word.</p>
     <div className="test-details"><span>10 words</span><span>Practice tailored to you</span><span>Progress saved as you go</span></div>
     <DirectionSetting mode={mode} onChange={onModeChange} />
+    <AutoPronunciationSetting checked={autoPronunciation} onChange={onAutoPronunciationChange} compact />
     <button className="primary-button" onClick={onStart}>Start test →</button>
     <p className="test-hint">Practice as often as you like. Missed words, new discoveries, and timely reviews keep your learning moving.</p>
   </section>
@@ -74,9 +78,10 @@ export function DailyTest({ history, now, catalog, mode, onModeChange, session, 
         return <li key={entry.wordId}><div><strong lang={content.sourceLang}>{content.prompt}{!catalog.some(w=>w.id===entry.wordId) && <small> · Deleted</small>}</strong><small>{modeLabels[entry.direction]}</small></div><span>{entry.level} · {entry.score}/100</span></li>
       })}</ul>}
       <DirectionSetting mode={mode} onChange={onModeChange} />
+      <AutoPronunciationSetting checked={autoPronunciation} onChange={onAutoPronunciationChange} compact />
       <div className="test-actions"><button className="primary-button" onClick={onStart}>Start another test</button><button className="secondary-button" onClick={onLearned}>View Learned</button></div>
     </section>
   }
 
-  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
+  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" autoPronunciation={autoPronunciation} onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
 }

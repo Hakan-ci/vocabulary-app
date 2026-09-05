@@ -2,12 +2,14 @@ import { InstallButton } from './Pwa'
 import { useState } from 'react'
 import type { Application } from './data/application'
 import { DataManagement } from './DataManagement'
-export function Account({app}:{app:Application}) {
+import { AutoPronunciationSetting } from './Pronunciation'
+export function Account({app,autoPronunciation,onAutoPronunciationChange}:{app:Application;autoPronunciation:boolean;onAutoPronunciationChange:(value:boolean)=>void}) {
   const [signup,setSignup]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false)
   const run=async(action:()=>Promise<unknown>)=>{setBusy(true);setMessage('');try{const result=await action();if(typeof result==='string')setMessage(result)}catch(e){setMessage(e instanceof Error?e.message:'Please try again.')}finally{setBusy(false)}}
   const preview=app.previewOpen?app.preview:null
   return <section className="test-panel account-panel" aria-label="Account">
     <h2>Your learning, wherever you go.</h2><InstallButton/>
+    <section className="account-setting" aria-label="Pronunciation settings"><h3>Pronunciation</h3><AutoPronunciationSetting checked={autoPronunciation} onChange={onAutoPronunciationChange} /></section>
     {!app.configured?<p>Synchronization is not configured yet. Your vocabulary and practice continue locally. Follow SUPABASE_SETUP.md to connect a project.</p>:!app.user||!app.authenticated?<>
       <p>{app.user?'Your cached account is available offline. Sign in again to resume synchronization.':''}</p><p>Sign in to synchronize your vocabulary and progress. You can also keep using this device locally.</p>
       {app.user&&<button className="secondary-button" onClick={()=>void run(()=>app.auth.signOut())}>Sign out of cached account</button>}

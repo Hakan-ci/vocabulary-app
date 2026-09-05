@@ -109,7 +109,7 @@ test('legacy results migrate once undated; unfinished prefix is not counted twic
   const raw={...legacy,version:3}, map=new Map([[LEARNING_STATE_KEY,JSON.stringify(raw)]])
   const storage={getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,v)}
   let state=loadLearningState(storage,words,now).value
-  assert.equal(state.version,5);assert.equal(state.dailyGoal,10)
+  assert.equal(state.version,6);assert.equal(state.dailyGoal,10)
   assert.equal(sourceCounts(state.activity.undated.daily).answered,2)
   assert.equal(Object.keys(state.activity.days).length,0)
   assert.deepEqual(loadLearningState(storage,words,now+100).value,state)

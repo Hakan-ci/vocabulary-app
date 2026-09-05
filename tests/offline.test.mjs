@@ -12,7 +12,7 @@ test('IndexedDB migration commits queue and projection atomically, retains backu
  const local=memoryStorage(),store=new IndexedAccountStore(crypto.randomUUID()),cache=emptyCache()
  cache.version=1;cache.queue=[{id:crypto.randomUUID(),kind:'favorite',at:1,status:'pending',changes:[{key:'favorite/b:1',before:null,after:true}]}];cache.backups=[{...cache.queue[0],status:'conflict'}]
  local.setItem(key,JSON.stringify(cache));const imported=await store.load(key,local)
- assert.equal(imported.version,3);assert.equal(imported.queue[0].id,cache.queue[0].id);assert.deepEqual(imported.backups,cache.backups)
+ assert.equal(imported.version,4);assert.equal(imported.queue[0].id,cache.queue[0].id);assert.deepEqual(imported.backups,cache.backups)
  imported.initialized=true;await store.save(key,imported)
  local.setItem(key,JSON.stringify(emptyCache()));assert.deepEqual(await store.load(key,local),imported)
  const corrupt={...imported,queue:[{...imported.queue[0],changes:[],circular:null}]};corrupt.queue[0].circular=corrupt

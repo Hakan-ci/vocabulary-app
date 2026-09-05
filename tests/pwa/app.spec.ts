@@ -5,6 +5,12 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 async function ready(page:import('@playwright/test').Page){await page.goto('/');await expect(page.getByRole('heading',{name:/Your vocabulary/})).toBeVisible();await page.evaluate(async()=>{await navigator.serviceWorker.ready});await page.reload();await page.waitForFunction(()=>!!navigator.serviceWorker.controller)}
 async function nav(page:import('@playwright/test').Page,name:RegExp){await page.getByRole('navigation',{name:page.viewportSize()!.width<768?'Mobile navigation':'Main navigation'}).getByRole('button',{name}).click()}
+async function mockSpeech(page:import('@playwright/test').Page){await page.addInitScript(()=>{
+  class Utterance {text:string;lang='';rate=1;voice:any=null;onstart:(()=>void)|null=null;onend:(()=>void)|null=null;onerror:(()=>void)|null=null;constructor(text:string){this.text=text}}
+  const voices=[{lang:'en-GB',default:true,name:'English'},{lang:'en-US',default:false,name:'US English'}]
+  Object.defineProperty(window,'SpeechSynthesisUtterance',{value:Utterance,configurable:true})
+  Object.defineProperty(window,'speechSynthesis',{value:{getVoices:()=>voices,addEventListener:()=>{},removeEventListener:()=>{},cancel:()=>{(window as any).__speechCancels=((window as any).__speechCancels??0)+1},speak:(utterance:Utterance)=>{((window as any).__spoken??=[]).push({text:utterance.text,lang:utterance.lang,rate:utterance.rate,voice:utterance.voice?.lang});utterance.onstart?.()}},configurable:true})
+})}
 test('manifest, icons and unopened lazy screens work after offline reload',async({page,context})=>{
  await ready(page)
  const manifest=await page.evaluate(async()=>await(await fetch(document.querySelector<HTMLLinkElement>('link[rel=manifest]')!.href)).json());expect(manifest.name).toBe('Kelime');expect(manifest.display).toBe('standalone');expect(manifest.icons).toHaveLength(3)
@@ -73,4 +79,27 @@ test('filtered multi-selection, Undo, hiding, and Account restoration work offli
  await page.getByRole('button',{name:'Select',exact:true}).click();await page.getByRole('button',{name:'Select all results'}).click();await page.getByRole('button',{name:'Delete Selected'}).click();await page.getByRole('dialog').getByRole('button',{name:'Remove words'}).click();await page.waitForTimeout(10_300)
  await nav(page,/Account/);await page.getByText('Hidden built-in words (1)').click();await expect(page.getByText(/Hello · Merhaba/)).toBeVisible();await page.getByRole('button',{name:'Restore',exact:true}).click();await nav(page,/Vocabulary/);await search.fill('hello');await expect(page.getByRole('heading',{name:'Hello',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
  await page.setViewportSize({width:390,height:844});await search.fill('house');await page.getByRole('button',{name:'Select',exact:true}).click();await page.getByRole('button',{name:'Select all results'}).click();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.getByRole('button',{name:'Cancel',exact:true}).click()
+})
+
+test('pronunciation works in vocabulary and editing without leaking reverse answers',async({page})=>{
+ await mockSpeech(page);await ready(page)
+ await page.getByRole('button',{name:'Pronounce Hello'}).click();expect((await page.evaluate(()=>(window as any).__spoken)).at(-1)).toEqual({text:'Hello',lang:'en-US',rate:1,voice:'en-US'})
+ await page.getByRole('button',{name:'Add Word',exact:true}).click();await page.getByLabel('English',{exact:true}).fill('give up');await page.getByRole('button',{name:'Pronounce current English word'}).click();expect((await page.evaluate(()=>(window as any).__spoken)).at(-1).text).toBe('give up')
+ await page.getByRole('button',{name:'Close',exact:true}).click();await nav(page,/Daily Test/);await page.getByLabel('Test direction').selectOption('turkishToEnglish');await page.evaluate(()=>(window as any).__spoken=[]);await page.getByRole('button',{name:'Start test →'}).click()
+ await expect(page.getByRole('button',{name:/Pronounce/})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(0)
+ const answer=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('kelime-learning-state')!).session;return s.questions[s.index].snapshot.acceptedAnswers[0]})
+ await page.getByLabel('English meaning',{exact:true}).fill(answer);await page.getByLabel('English meaning',{exact:true}).press('Enter')
+ await expect(page.getByRole('button',{name:/Pronounce correct answer/})).toBeVisible();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
+ await nav(page,/Vocabulary/);await nav(page,/Daily Test/);await page.getByRole('button',{name:'Continue your test'}).click();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
+ await nav(page,/Account/);await page.getByLabel('Automatic pronunciation').uncheck();expect((await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!).autoPronunciation))).toBe(false)
+ await nav(page,/Vocabulary/);await page.getByRole('button',{name:'Pronounce Hello'}).click();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(2)
+})
+
+test('forward prompts play once and unsupported browsers show one settings note',async({page})=>{
+ await mockSpeech(page);await ready(page);await nav(page,/Daily Test/);await page.evaluate(()=>(window as any).__spoken=[]);await page.getByRole('button',{name:'Start test →'}).click()
+ await expect(page.getByRole('button',{name:/^Pronounce /})).toBeVisible();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
+ await nav(page,/Vocabulary/);await nav(page,/Daily Test/);await page.getByRole('button',{name:'Continue your test'}).click();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
+
+ const unsupported=await page.context().newPage();await unsupported.addInitScript(()=>{Object.defineProperty(window,'speechSynthesis',{value:undefined,configurable:true});Object.defineProperty(window,'SpeechSynthesisUtterance',{value:undefined,configurable:true})});await ready(unsupported)
+ await expect(unsupported.getByRole('button',{name:/Pronounce Hello/})).toHaveCount(0);await nav(unsupported,/Account/);await expect(unsupported.getByText('Pronunciation is not available on this device.')).toHaveCount(1);await unsupported.close()
 })

@@ -52,11 +52,11 @@ export function clearUserVocabulary(data:AppData,now=Date.now()):AppData{return 
 export function resetVocabularyProgress(data:AppData,now=Date.now()):AppData{
   const allPersonal=data.vocabulary.entries.map(word=>word.id),learning=archiveAffected(data.learning,new Set(combinedCatalog(data.vocabulary).map(word=>word.id)),now)
   const vocabulary:UserVocabulary={...data.vocabulary,entries:[],overrides:{},suppressedBuiltinIds:[],hiddenBuiltinIds:[],hiddenBuiltinState:{},legacyEntries:[],deletedIds:unique([...data.vocabulary.deletedIds,...allPersonal])}
-  return {vocabulary,favorites:[],learning:{...learning,history:emptyHistory(words),session:null,reviewSession:null,preferredMode:data.learning.preferredMode,dailyGoal:data.learning.dailyGoal}}
+  return {vocabulary,favorites:[],learning:{...learning,history:emptyHistory(words),session:null,reviewSession:null,preferredMode:data.learning.preferredMode,dailyGoal:data.learning.dailyGoal,autoPronunciation:data.learning.autoPronunciation}}
 }
 export function clearVocabularyData(data:AppData,now=Date.now()):AppData{
   const reset=resetVocabularyProgress(data,now)
-  return {...reset,learning:{...reset.learning,sessions:{},activity:emptyActivity(now),dailyGoal:10,preferredMode:'englishToTurkish'}}
+  return {...reset,learning:{...reset.learning,sessions:{},activity:emptyActivity(now),dailyGoal:10,preferredMode:'englishToTurkish',autoPronunciation:true}}
 }
 export function vocabularyDeletionSnapshot(data:AppData,ids:readonly number[],commandId:string,now=Date.now()):DeletionSnapshot{
   const result=deleteVocabularyEntries(data,ids,now)

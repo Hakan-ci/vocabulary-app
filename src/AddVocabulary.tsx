@@ -7,6 +7,8 @@ import { classifyPreview, parseVocabulary, validateEntry } from './vocabularyImp
 import type { ImportRow } from './vocabularyImport'
 import type { WordEntry } from './wordFields'
 import { englishKey } from './wordFields'
+import { PronunciationButton } from './Pronunciation'
+import { usePronunciation } from './pronunciationContext'
 export type EntryMode = 'single' | 'bulk'
 type Props = { mode: EntryMode; onMode: (mode: EntryMode) => void; catalog: readonly VocabularyWord[]; editingWord?: VocabularyWord; onClose: () => void; onSave: (rows: ImportRow[]) => number; onEdit: (id: number, entry: WordEntry, separate: boolean) => void }
 function AnswerFields({ values, onChange, language }: { values: string[]; onChange: (values: string[]) => void; language: 'Turkish' | 'English' }) {
@@ -19,6 +21,7 @@ function AnswerFields({ values, onChange, language }: { values: string[]; onChan
   </fieldset>
 }
 export function AddVocabulary({ mode, onMode, catalog, editingWord, onClose, onSave, onEdit }: Props) {
+  const { stop: stopPronunciation } = usePronunciation()
   const [english,setEnglish] = useState(editingWord?.english ?? '')
   const [meanings,setMeanings] = useState(editingWord?.turkishMeanings ?? [''])
   const [alternatives,setAlternatives] = useState(editingWord?.englishAlternatives ?? [])
@@ -29,6 +32,7 @@ export function AddVocabulary({ mode, onMode, catalog, editingWord, onClose, onS
   const [text,setText] = useState(''), [rows,setRows] = useState<ImportRow[] | null>(null), [error,setError] = useState('')
   const panel = useRef<HTMLElement>(null)
   useEffect(() => { if (editingWord) { panel.current?.scrollIntoView({block:'start'}); panel.current?.querySelector('input')?.focus() } }, [editingWord])
+  useEffect(() => stopPronunciation, [stopPronunciation])
   const invalidate = () => { setRows(null); setError('') }
   const preview = rows === null ? null : classifyPreview(rows,catalog)
   const valid = preview?.filter(row => row.status === 'Ready' || row.status === 'Merge').length ?? 0
@@ -42,7 +46,7 @@ export function AddVocabulary({ mode, onMode, catalog, editingWord, onClose, onS
       if (editingWord) {try {onEdit(editingWord.id,entry,separate)} catch(e) {setError(e instanceof Error ? e.message : 'Your changes could not be saved. Try again.')}}
       else setRows([{id:0,source:english,entry}])
     }}>
-      <div className="entry-fields"><label>English<input required lang="en" value={english} onChange={e => {setEnglish(e.target.value);setSeparate(false);invalidate()}} /></label><label>Part of speech (optional)<input list="speech-suggestions" value={speech} onChange={e => {setSpeech(e.target.value);invalidate()}} /></label><label>Example sentence (optional)<textarea rows={3} lang="en" value={example} onChange={e => {setExample(e.target.value);invalidate()}} /></label></div>
+      <div className="entry-fields"><label>English<span className="editor-english-row"><input required lang="en" value={english} onChange={e => {setEnglish(e.target.value);setSeparate(false);invalidate()}} /><PronunciationButton text={english.trim()} speechKey="editor:english" label="Pronounce current English word" disabled={!english.trim()} /></span></label><label>Part of speech (optional)<input list="speech-suggestions" value={speech} onChange={e => {setSpeech(e.target.value);invalidate()}} /></label><label>Example sentence (optional)<textarea rows={3} lang="en" value={example} onChange={e => {setExample(e.target.value);invalidate()}} /></label></div>
       <datalist id="speech-suggestions">{speechSuggestions.map(s => <option key={s} value={s} />)}</datalist>
       <TagEditor tags={tags} suggestions={catalogTags(catalog)} onChange={v=>{setTags(v);invalidate()}} />
       <AnswerFields language="Turkish" values={meanings} onChange={v => {setMeanings(v);invalidate()}} />

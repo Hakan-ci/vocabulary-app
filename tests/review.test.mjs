@@ -105,7 +105,7 @@ test('storage migration preserves Daily Test; Review phases restore and corrupt 
   const map = new Map([[LEARNING_STATE_KEY, JSON.stringify(old)]])
   const storage = { getItem:key => map.get(key) ?? null, setItem:(key,value) => map.set(key,value) }
   let state = loadLearningState(storage).value
-  assert.equal(state.version, 5)
+  assert.equal(state.version, 6)
   assert.equal(state.reviewSession, null)
   assert.deepEqual(state.session, old.session)
   state.reviewSession = createReviewSession(words, state.history, now)

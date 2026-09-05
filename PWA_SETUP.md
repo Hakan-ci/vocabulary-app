@@ -29,6 +29,8 @@ npm run test:browser
 
 Workbox precaches the HTML shell, CSS, icons, and every application JavaScript chunk, including Account, Progress, editing/importing, Daily Test and Review. Previously unopened screens work offline after one successful production visit. Only build assets are cached. Supabase requests, authentication responses, credentials, account records and mutations have **no service-worker cache route**. There is no background-sync queue in the service worker.
 
+English pronunciation is generated on the device through the browser Web Speech API. It creates no downloaded audio asset, Cache Storage entry, or service-worker request. Installed iOS and Android browsers can differ in voice availability and autoplay policy; verify automatic prompt/reveal playback and manual replay on each physical target device.
+
 Application repositories store guest data in the existing localStorage keys. Account data and its outbox live in IndexedDB. Local browser data remains private to the browser profile but is not an encrypted vault; sign out before sharing a device. Browser storage eviction/clearing can remove unsynchronized data; cloud synchronization requires the application to be open, online and authenticated.
 
 ## IndexedDB migration and account isolation
@@ -45,7 +47,9 @@ Apply migrations in order to a test project before shipping the client:
 
 1. `supabase/migrations/001_kelime.sql` for new projects only; do not rerun it on an existing installation.
 2. `supabase/migrations/002_events.sql` adds the event ledger, session archive field and protocol-2 RPCs. It does not rewrite migration 001.
-3. Run the two-account/device verification below, then roll out the client.
+3. Apply `003_vocabulary_deletion.sql` for vocabulary deletion and reset commands.
+4. Apply `004_pronunciation.sql` for the synchronized pronunciation preference and protocol-4 RPCs.
+5. Run the two-account/device verification below, then roll out the client.
 
 The first accepted v2 mutation upgrades that account. The legacy writer is locked out after upgrade; it cannot replace event-based progress. Keep queued legacy data until the updated client migrates it. Recoverable pending single assessments retain their operation identity; ambiguous changes become visible conflicts instead of guessed counter increments.
 

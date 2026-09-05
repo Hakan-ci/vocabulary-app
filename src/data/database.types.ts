@@ -393,6 +393,8 @@ export type Database = { public: { Tables: {
  kelime_apply_v2: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot_v3: { Args: Record<string,never>; Returns: Json }
  kelime_apply_v3: { Args: { p_operation: Json }; Returns: Json }
+ kelime_snapshot_v4: { Args: Record<string,never>; Returns: Json }
+ kelime_apply_v4: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot: { Args: Record<string,never>; Returns: Json }
  kelime_apply: { Args: { p_operation: Json }; Returns: Json }
 }; Enums: Record<string,never>; CompositeTypes: Record<string,never> } }

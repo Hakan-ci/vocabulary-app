@@ -5,14 +5,14 @@ import { equal,newId } from './models.ts'
 import { emptyIdentities } from './codec.ts'
 import type { StorageAccess } from './localRepository.ts'
 export const cacheKey = (project: string,user: string)=>`kelime-account:${encodeURIComponent(project)}:${user}:v1`
-export const emptyCache = (): SyncCache=>({version:3,identities:emptyIdentities(),base:{revision:0,cells:{}},queue:[],backups:[],initialized:false})
+export const emptyCache = (): SyncCache=>({version:4,identities:emptyIdentities(),base:{revision:0,cells:{}},queue:[],backups:[],initialized:false})
 export function diffCells(before: Cells,after: Cells): Change[] { return [...new Set([...Object.keys(before),...Object.keys(after)])].filter(key=>!equal(before[key],after[key])).map(key=>({key,before:before[key]??null,after:after[key]??null})) }
 export function applyChanges(cells: Cells,changes: Change[]): Cells { const next={...cells};for(const change of changes){if(change.after===null)delete next[change.key];else next[change.key]=change.after}return next }
 export function projection(cache: SyncCache): Cells { return cache.queue.filter(op=>op.status==='pending').reduce((cells,op)=>projectOperation(cells,op),cache.base.cells) }
 export function parseCache(raw: string|null): SyncCache {
   if(!raw)return emptyCache()
   const value=JSON.parse(raw) as SyncCache
-  if(![1,2,3].includes(value.version)||!value.base?.cells||!Number.isInteger(value.base.revision)||!value.identities?.localToCloud||!Number.isSafeInteger(value.identities.nextId)||!Array.isArray(value.queue)||!Array.isArray(value.backups))throw Error('Account cache could not be read. Your saved copy has not been overwritten.')
+  if(![1,2,3,4].includes(value.version)||!value.base?.cells||!Number.isInteger(value.base.revision)||!value.identities?.localToCloud||!Number.isSafeInteger(value.identities.nextId)||!Array.isArray(value.queue)||!Array.isArray(value.backups))throw Error('Account cache could not be read. Your saved copy has not been overwritten.')
   if(value.queue.some(op=>!op.id||!Array.isArray(op.changes)||!['pending','conflict'].includes(op.status)))throw Error('Pending sync actions could not be read. Your saved copy has not been overwritten.')
   const uuid=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
   for(const map of [value.identities,value.migrationIdentities].filter(Boolean)) {
@@ -20,7 +20,7 @@ export function parseCache(raw: string|null): SyncCache {
     if(map!.nextId<1_000_000||pairs.some(([id,ref])=>!Number.isSafeInteger(Number(id))||Number(id)<1_000_000||Number(id)>=map!.nextId||!uuid(ref))||new Set(pairs.map(([,ref])=>ref)).size!==pairs.length)throw Error('Account identities could not be read. The saved copy is preserved.')
   }
   if(Array.isArray(value.base.cells)||value.base.revision<0||typeof value.initialized!=='boolean'||value.migrationChoice!==undefined&&!['account','imported'].includes(value.migrationChoice)||value.queue.some(op=>!uuid(op.id)||!['vocabulary','delete','bulk-delete','restore','clear-user','reset-progress','clear-all','favorite','learned','preferences','start','draft','submit','assess','migration','archive'].includes(op.kind)||op.notBefore!==undefined&&(!Number.isFinite(op.notBefore)||op.notBefore<op.at)||op.changes.some(c=>typeof c.key!=='string'||!('before'in c)||!('after'in c))))throw Error('Invalid account cache. The saved copy is preserved.')
-  return {...value,version:3,queue:value.queue.map(op=>({...op,protocol:op.protocol??2}))}
+  return {...value,version:4,queue:value.queue.map(op=>({...op,protocol:op.protocol??2}))}
 }
 export class SyncService {
   cache: SyncCache
@@ -59,7 +59,7 @@ export class SyncService {
     const last=this.cache.queue.at(-1)
     if(kind==='draft'&&!this.running&&last?.kind==='draft'&&last.status==='pending'&&equal(last.changes.map(c=>c.key),changes.map(c=>c.key))) {
       last.changes=changes.map(c=>({...c,before:last.changes.find(old=>old.key===c.key)!.before}));last.at=Date.now()
-    } else this.cache.queue.push({id:newId(),protocol:3,kind,at:Date.now(),changes,status:'pending',...options})
+    } else this.cache.queue.push({id:newId(),protocol:4,kind,at:Date.now(),changes,status:'pending',...options})
     const id=this.cache.queue.at(-1)!.id
     this.persist();this.schedule(options.notBefore?Math.max(0,options.notBefore-Date.now()):kind==='draft'?500:0)
     return id
