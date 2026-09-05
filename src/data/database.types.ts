@@ -88,6 +88,33 @@ export type Database = { public: { Tables: {
     }
     Relationships: []
   }
+  hidden_builtin_vocabulary: {
+    Row: {
+      user_id: string
+      vocabulary_id: number
+      hidden: boolean
+      archived_state: Json
+      updated_at: string
+      revision: number
+    }
+    Insert: {
+      user_id: string
+      vocabulary_id: number
+      hidden?: boolean
+      archived_state?: Json
+      updated_at?: string
+      revision?: number
+    }
+    Update: {
+      user_id?: string
+      vocabulary_id?: number
+      hidden?: boolean
+      archived_state?: Json
+      updated_at?: string
+      revision?: number
+    }
+    Relationships: []
+  }
   learning_progress: {
     Row: {
       id: string
@@ -196,18 +223,21 @@ export type Database = { public: { Tables: {
       created_at: string
       revision: number
       sync_protocol: number
+      reset_epoch: number
     }
     Insert: {
       id: string
       created_at?: string
       revision?: number
       sync_protocol?: number
+      reset_epoch?: number
     }
     Update: {
       id?: string
       created_at?: string
       revision?: number
       sync_protocol?: number
+      reset_epoch?: number
     }
     Relationships: []
   }
@@ -361,6 +391,8 @@ export type Database = { public: { Tables: {
 }; Views: Record<string,never>; Functions: {
  kelime_snapshot_v2: { Args: Record<string,never>; Returns: Json }
  kelime_apply_v2: { Args: { p_operation: Json }; Returns: Json }
+ kelime_snapshot_v3: { Args: Record<string,never>; Returns: Json }
+ kelime_apply_v3: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot: { Args: Record<string,never>; Returns: Json }
  kelime_apply: { Args: { p_operation: Json }; Returns: Json }
 }; Enums: Record<string,never>; CompositeTypes: Record<string,never> } }

@@ -1,5 +1,13 @@
 # Kelime
 
+## Vocabulary selection and data management
+
+Vocabulary has a transient **Select** mode. Selections survive search, filter, and sort changes until you cancel or leave the page. A mixed batch permanently removes personal entries and hides built-in entries. Any unfinished practice containing an affected word is archived first, while assessed answers and historical activity remain intact.
+
+Commands affecting at most 20 words have a durable 10-second Undo period. Account synchronization does not transmit that command until the period expires. Hidden built-ins, including their previous progress and Favorite/Learned state, can be restored from **Account → Data Management**.
+
+Data Management provides three cleanup levels: personal words only, current vocabulary and progress, or all vocabulary-learning data. The last option requires typing `DELETE`; it preserves authentication, the Supabase account, PWA caches, identity high-water marks, and synchronization receipts.
+
 A responsive English–Turkish vocabulary app built with React, TypeScript, and Vite. It works locally by default, with optional Supabase email/password accounts and safe cloud synchronization. No flashcards are included.
 
 ## Run locally

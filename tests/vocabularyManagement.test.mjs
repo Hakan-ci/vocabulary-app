@@ -17,7 +17,7 @@ test('tags normalize Unicode and whitespace; legacy topics and explicit empty ar
   assert.deepEqual(normalizeTags([' Travel ','TRAVEL','Study   notes','café','café','',null]),['Travel','Study notes','café'])
   const old={version:2,nextId:1000010,entries:[{id:1000000,english:'commute',turkish:'işe gidip gelmek',type:'custom POS',topic:'My words'}],overrides:{0:{english:'Hello',turkish:'Merhaba',type:'interjection'}},suppressedBuiltinIds:[30],legacyEntries:[]}
   const migrated=parseUserVocabulary(old)
-  assert.equal(migrated.version,3); assert.deepEqual(migrated.entries[0].tags,['My words']);assert.equal(migrated.entries[0].createdAt,null)
+  assert.equal(migrated.version,4); assert.deepEqual(migrated.entries[0].tags,['My words']);assert.equal(migrated.entries[0].createdAt,null)
   assert.equal(migrated.entries[0].partOfSpeech,'custom POS');assert.deepEqual(migrated.overrides[0].tags,['Everyday'])
   migrated.entries[0].tags=[]
   assert.deepEqual(parseUserVocabulary(JSON.parse(JSON.stringify(migrated))),migrated)

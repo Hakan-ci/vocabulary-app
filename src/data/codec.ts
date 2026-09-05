@@ -1,6 +1,6 @@
 import { emptyUserVocabulary, combinedCatalog } from '../userVocabulary.ts'
 import { emptyLearningState, parseLearningState } from '../learningState.ts'
-import { emptyWordHistory } from '../learningHistory.ts'
+import { emptyWordHistory,parseWordHistory } from '../learningHistory.ts'
 import { validateEntry, creationTime } from '../wordFields.ts'
 import type { AppData, Cells, IdentityMap, Json } from './models.ts'
 import { equal,json,newId } from './models.ts'
@@ -33,6 +33,7 @@ export function encodeData(data: AppData,map: IdentityMap): Cells {
   for(const session of [data.learning.session,data.learning.reviewSession?.practice,...Object.values(data.learning.sessions??{}).filter(r=>r.archivedAt).map(r=>r.practice)])if(session)for(const q of session.questions)if(data.vocabulary.deletedIds.includes(q.wordId))cells[`archived-word/${reference(q.wordId,map)}`]=json({...q.snapshot.word,id:reference(q.wordId,map)})
   for(const id of data.vocabulary.deletedIds)cells[`deleted/${reference(id,map)}`]=true
   for(const id of data.vocabulary.suppressedBuiltinIds)cells[`suppressed/b:${id}`]=true
+  for(const id of data.vocabulary.hiddenBuiltinIds){cells[`hidden/b:${id}`]=true;const archived=data.vocabulary.hiddenBuiltinState[id];if(archived)cells[`hidden-state/b:${id}`]=json(archived)}
   for(const [id,h] of Object.entries(data.learning.history))if(!equal(h,emptyWordHistory()))cells[`progress/${reference(Number(id),map)}`]=json(h)
   for(const id of data.favorites)cells[`favorite/${reference(id,map)}`]=true
   cells['setting/goal']=data.learning.dailyGoal;cells['setting/mode']=data.learning.preferredMode
@@ -51,6 +52,8 @@ export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppDat
     if(kind==='word'&&value&&typeof value==='object'&&!Array.isArray(value)) {const entry=validateEntry(value);if(!entry)throw Error('Invalid vocabulary received from account.');const id=localId(ref,map),word={...entry,id,createdAt:creationTime(value.createdAt)};if(ref.startsWith('b:'))vocabulary.overrides[id]=word;else vocabulary.entries.push(word)}
     if(kind==='deleted'&&value===true)vocabulary.deletedIds.push(localId(ref,map))
     if(kind==='suppressed'&&value===true)vocabulary.suppressedBuiltinIds.push(localId(ref,map))
+    if(kind==='hidden'&&value===true)vocabulary.hiddenBuiltinIds.push(localId(ref,map))
+    if(kind==='hidden-state'&&value&&typeof value==='object'&&!Array.isArray(value)){const raw=value as {id?:unknown;hiddenAt?:unknown;history?:unknown;favorite?:unknown},id=localId(ref,map),archived=parseWordHistory(raw.history);if(id<1_000_000&&archived&&typeof raw.hiddenAt==='number'&&Number.isFinite(raw.hiddenAt)&&typeof raw.favorite==='boolean')vocabulary.hiddenBuiltinState[id]={id,hiddenAt:raw.hiddenAt,history:archived,favorite:raw.favorite}}
     if(kind==='progress')history[localId(ref,map)]=value
     if(kind==='favorite'&&value===true)favorites.push(localId(ref,map))
     if(kind==='activity'&&/^\d{4}-\d{2}-\d{2}$/.test(ref))days[ref]=value
@@ -59,6 +62,7 @@ export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppDat
   const catalog=combinedCatalog(vocabulary),initial=emptyLearningState(catalog,now)
   const start=cells['activity/start'] as {startedAt:number;startedDate:string}|undefined
   const sessions=Object.fromEntries(Object.entries(cells).filter(([key])=>key.startsWith('session-record/')).map(([key,v])=>[key.slice(15),mapSnapshot(v,map,false)]))
-  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,vocabulary.deletedIds)
+  const unavailable=[...vocabulary.deletedIds,...vocabulary.hiddenBuiltinIds]
+  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,unavailable)
   return {vocabulary,learning,favorites:favorites.filter(id=>catalog.some(w=>w.id===id))}
 }

@@ -1,6 +1,7 @@
 import { InstallButton } from './Pwa'
 import { useState } from 'react'
 import type { Application } from './data/application'
+import { DataManagement } from './DataManagement'
 export function Account({app}:{app:Application}) {
   const [signup,setSignup]=useState(false),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false)
   const run=async(action:()=>Promise<unknown>)=>{setBusy(true);setMessage('');try{const result=await action();if(typeof result==='string')setMessage(result)}catch(e){setMessage(e instanceof Error?e.message:'Please try again.')}finally{setBusy(false)}}
@@ -29,5 +30,6 @@ export function Account({app}:{app:Application}) {
     </section>}
     {app.sync&&<><p>{app.sync.cache.queue.length} pending or conflicted actions</p>{app.sync.cache.queue.filter(op=>op.status==='conflict').map(op=><div className="sync-conflict" key={op.id}><h3>{op.kind} conflict</h3><p>{op.message}</p><details><summary>Saved device action</summary><pre>{app.exportConflict(op.id)}</pre></details><button className="secondary-button" onClick={()=>app.sync?.resolve(op.id,'account')}>Continue with account data</button>{['vocabulary','favorite','learned','preferences'].includes(op.kind)&&<button className="secondary-button" onClick={()=>app.sync?.resolve(op.id,'device')}>Apply my values to current account</button>}</div>)}{app.sync.cache.backups.length>0&&<details><summary>Preserved conflict actions ({app.sync.cache.backups.length})</summary><pre>{JSON.stringify(app.sync.cache.backups,null,2)}</pre></details>}</>}
     {(message||app.error||app.sync?.error)&&<p className="answer-error" role="alert">{message||app.error||app.sync?.error}</p>}
+    <DataManagement app={app}/>
   </section>
 }

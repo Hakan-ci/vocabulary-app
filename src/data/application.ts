@@ -4,7 +4,7 @@ import { acquireAccountLock } from './accountLock.ts'
 import type { AppData, Cells, OperationKind, CloudTransport } from './models.ts'
 import { newId,equal } from './models.ts'
 import { decodeData,encodeData,emptyIdentities } from './codec.ts'
-import { loadLocal,recoverLocal,saveLocal,vocabularyRepository } from './localRepository.ts'
+import { loadLocal,recoverLocal,recordDeletionJournal,saveLocal,vocabularyRepository } from './localRepository.ts'
 import type { StorageAccess } from './localRepository.ts'
 import { SyncService,cacheKey,projection,parseCache } from './syncService.ts'
 import { prepareMigration,meaningfulLocal,duplicateCandidates } from './migration.ts'
@@ -16,6 +16,12 @@ import type { AccountUser } from './authService.ts'
 import type { ImportRow } from '../vocabularyImport.ts'
 import type { WordEntry } from '../wordFields.ts'
 import type { LearningState } from '../learningState.ts'
+import { combinedCatalog } from '../userVocabulary.ts'
+import { planVocabularyDeletion, vocabularyDeletionSnapshot } from '../vocabularyManagement.ts'
+import type { ClearLevel, DeletionSnapshot, VocabularyDeletionPlan } from '../vocabularyManagement.ts'
+
+const PENDING_DELETION_KEY='kelime-pending-vocabulary-deletion'
+export type PendingDeletionNotice={commandId:string;deadline:number;personal:number;builtIns:number}
 
 export class Application {
   version=0
@@ -44,6 +50,8 @@ export class Application {
   private project: string | undefined
   private transport: CloudTransport | undefined
   private stopSync:(()=>void)|undefined
+  private guestDeletion:DeletionSnapshot|null=null
+  private undoTimer:ReturnType<typeof setTimeout>|undefined
   constructor(storage:StorageAccess, options: {project?: string; transport?: CloudTransport; auth?: typeof authService; store?: AccountStore} = {}) {
     this.durable=options.store??(typeof indexedDB!=='undefined'?accountStore:undefined)
     this.auth=options.auth??authService
@@ -53,6 +61,7 @@ export class Application {
     this.guest=decodeData({},emptyIdentities())
     try {recoverLocal(storage);const loaded=loadLocal(storage);this.guest=loaded.data;this.storageError=loaded.error;this.identifySessions(this.guest);saveLocal(storage,this.guest)}catch{this.storageError=true}
     this.data=this.guest
+    try{const pending=JSON.parse(this.storage.getItem(PENDING_DELETION_KEY)??'null') as DeletionSnapshot|null;if(pending?.version===1&&pending.deadline&&pending.deadline>Date.now()){this.guestDeletion=pending;this.guest=pending.after;this.data=pending.after;saveLocal(this.storage,pending.after);this.armUndo(pending.deadline)}else if(pending){recordDeletionJournal(this.storage,pending.after.vocabulary,[...pending.plan.builtInIds]);this.guest=pending.after;this.data=pending.after;saveLocal(this.storage,pending.after);this.storage.setItem(PENDING_DELETION_KEY,'null')}}catch{this.storageError=true}
     const auth=this.auth
     this.auth={...auth,signIn:async(email,password)=>{await auth.signIn(email,password);this.storage.setItem(this.rememberedKey+':signed-out','false');await this.setUser(await auth.current())},signOut:async()=>{this.storage.setItem(this.rememberedKey+':signed-out','true');this.storage.setItem(this.rememberedKey,'null');await this.setUser(null);try{await auth.signOut()}catch{this.reportError('Signed out on this device. The server could not be reached.')}}}
   }
@@ -69,7 +78,15 @@ export class Application {
   get current(){return this.data}
   get configured(){return !!this.project}
   get status(){return !this.online?'Offline':this.scope==='guest'?'Local only':!this.authenticated?'Changes waiting':this.sync?.status??'Sync error'}
+  get pendingDeletion():PendingDeletionNotice|null{
+    if(this.scope==='guest'){const value=this.guestDeletion;return value?.deadline&&value.deadline>Date.now()?{commandId:value.commandId,deadline:value.deadline,personal:value.plan.personalIds.length,builtIns:value.plan.builtInIds.length}:null}
+    const op=this.sync?.cache.queue.find(item=>item.kind==='bulk-delete'&&item.status==='pending'&&item.notBefore&&item.notBefore>Date.now())
+    if(!op)return null
+    try{const label=JSON.parse(op.undoLabel??'{}') as {personal?:number;builtIns?:number};return {commandId:op.id,deadline:op.notBefore!,personal:label.personal??0,builtIns:label.builtIns??0}}catch{return {commandId:op.id,deadline:op.notBefore!,personal:0,builtIns:0}}
+  }
+  private armUndo(deadline:number){clearTimeout(this.undoTimer);this.undoTimer=setTimeout(()=>{if(this.scope==='guest'&&this.guestDeletion?.deadline===deadline){try{recordDeletionJournal(this.storage,this.guestDeletion.after.vocabulary,this.guestDeletion.plan.builtInIds);this.storage.setItem(PENDING_DELETION_KEY,'null')}catch{this.storageError=true}this.guestDeletion=null}this.emit()},Math.max(0,deadline-Date.now()))}
   setOnline(online:boolean){this.online=online;this.networkNotice=online?'Back online — syncing saved progress.':'You’re offline — your progress will be saved on this device.';if(this.scope!=='guest')this.sync?.setOnline(online);this.emit()}
+  reloadGuest(){if(this.scope!=='guest')return;try{const loaded=loadLocal(this.storage);this.guest=loaded.data;this.data=loaded.data;this.storageError||=loaded.error;this.emit()}catch{this.storageError=true;this.emit()}}
   async ensureSaved(){if(this.scope==='guest')return !this.storageError;return await this.sync?.whenDurable()??false}
   isProvisional(source:'daily'|'review'){return this.sync?.cache.queue.some(op=>op.kind==='assess'&&op.status==='pending'&&op.changes.some(c=>{if(c.key!=='session/'+source)return false;const value=c.after as unknown as {phase?:string;practice?:{phase:string}}|null;return (source==='daily'?value?.phase:value?.practice?.phase)==='completed'}))??false}
   get candidates(){return this.sync?duplicateCandidates(this.guest,this.sync.cache.base.cells):[]}
@@ -136,21 +153,22 @@ export class Application {
     this.sync.enqueue('migration',this.sync.cache.base.cells,preview.cells,{expectedRevision:this.sync.cache.base.revision,migrationId:dataset})
     this.scope=this.user.id;this.migrationOpen=false;this.previewOpen=false;this.remember();this.refresh()
   }
-  private commit(next:AppData,kind:OperationKind) {
+  private commit(next:AppData,kind:OperationKind,options:Parameters<SyncService['enqueue']>[3]={}) {
     this.identifySessions(next)
-    if(this.scope==='guest'){this.guest=next;this.data=next;try{saveLocal(this.storage,next);this.storageError=false}catch{this.storageError=true}this.emit();return}
+    if(this.scope==='guest'){this.guest=next;this.data=next;try{saveLocal(this.storage,next);this.storageError=false}catch{this.storageError=true}this.emit();return undefined}
     const sync=this.sync!
     const before=projection(sync.cache),after=encodeData(next,sync.cache.identities)
     // Per-device selection is not a mutation of another device's current pointer.
     for(const source of ['daily','review'] as const){
       const old=source==='daily'?this.data.learning.session:this.data.learning.reviewSession
       const updated=source==='daily'?next.learning.session:next.learning.reviewSession
-      if(!['start','draft','submit','assess','archive'].includes(kind)||equal(old,updated)){
+      if(!['start','draft','submit','assess','archive','bulk-delete','clear-user','reset-progress','clear-all'].includes(kind)||equal(old,updated)){
         const key='session/'+source;if(key in before)after[key]=before[key];else delete after[key]
       }
     }
+    if(['bulk-delete','clear-user','reset-progress','clear-all'].includes(kind))sync.cache.selections={daily:next.learning.session?.syncId,review:next.learning.reviewSession?.practice.syncId}
     // Tombstones and reads used for deletion are checked in the server transaction too.
-    sync.enqueue(kind,before,after);this.data=next;this.emit()
+    const id=sync.enqueue(kind,before,after,options);this.data=next;this.emit();return id
   }
   saveLearning(next:LearningState,kind?:OperationKind) {
     const old=this.data.learning
@@ -170,6 +188,40 @@ export class Application {
   importWords(rows:ImportRow[]){const result=vocabularyRepository.import(this.data,rows);if(result.added||result.updated)this.commit(result.data,'vocabulary');return result}
   editWord(id:number,entry:WordEntry,separate:boolean){this.commit(vocabularyRepository.edit(this.data,id,entry,separate),'vocabulary')}
   deleteWord(id:number){this.commit(vocabularyRepository.delete(this.data,id),'delete')}
+  deletionPlan(ids:readonly number[]):VocabularyDeletionPlan{return planVocabularyDeletion(this.data,ids)}
+  deleteWords(ids:readonly number[],now=Date.now()){
+    const snapshot=vocabularyDeletionSnapshot(this.data,ids,newId(),now)
+    if(!snapshot.plan.ids.length)return snapshot.plan
+    if(this.scope==='guest'){
+      if(snapshot.deadline){this.storage.setItem(PENDING_DELETION_KEY,JSON.stringify(snapshot));this.guestDeletion=snapshot;this.armUndo(snapshot.deadline)}else recordDeletionJournal(this.storage,snapshot.after.vocabulary,snapshot.plan.builtInIds)
+      this.commit(snapshot.after,'bulk-delete')
+    }else{
+      const options=snapshot.deadline?{notBefore:snapshot.deadline,undoLabel:JSON.stringify({personal:snapshot.plan.personalIds.length,builtIns:snapshot.plan.builtInIds.length})}:{}
+      this.commit(snapshot.after,'bulk-delete',options)
+    }
+    return snapshot.plan
+  }
+  undoVocabularyDeletion(){
+    if(this.scope==='guest'){
+      const pending=this.guestDeletion;if(!pending?.deadline||pending.deadline<=Date.now())return false
+      this.guest=pending.before;this.data=pending.before;saveLocal(this.storage,pending.before);this.storage.setItem(PENDING_DELETION_KEY,'null');this.guestDeletion=null;clearTimeout(this.undoTimer);this.emit();return true
+    }
+    const pending=this.pendingDeletion;if(!pending||!this.sync?.cancelPending(pending.commandId))return false
+    this.refresh();return true
+  }
+  restoreBuiltIns(ids:readonly number[]){const next=vocabularyRepository.restoreBuiltIns(this.data,ids);if(this.scope==='guest')recordDeletionJournal(this.storage,next.vocabulary,ids);this.commit(next,'restore')}
+  clearVocabulary(level:ClearLevel,confirmation=''){
+    if(level==='everything'&&confirmation.trim()!=='DELETE')throw Error('Type DELETE exactly to continue.')
+    if(level==='everything'&&this.sync){this.sync.cache.queue=[];this.sync.cache.backups=[];this.sync.persist(false)}
+    const next=level==='personal'?vocabularyRepository.clearPersonal(this.data):level==='progress'?vocabularyRepository.resetProgress(this.data):vocabularyRepository.clearEverything(this.data)
+    if(this.scope==='guest')recordDeletionJournal(this.storage,next.vocabulary,[...this.data.vocabulary.hiddenBuiltinIds,...combinedCatalog(this.data.vocabulary).filter(word=>word.id<1_000_000).map(word=>word.id)])
+    this.commit(next,level==='personal'?'clear-user':level==='progress'?'reset-progress':'clear-all')
+    if(level==='everything'){
+      for(const key of ['kelime-learned','kelime-daily-test',PENDING_DELETION_KEY])try{this.storage.setItem(key,'null')}catch{this.storageError=true}
+      const storage=this.storage as StorageAccess&Partial<Pick<Storage,'length'|'key'|'removeItem'>>
+      if(typeof storage.length==='number'&&storage.key&&storage.removeItem)for(let index=storage.length-1;index>=0;index--){const key=storage.key(index);if(key?.startsWith('kelime-migration-backup:'))storage.removeItem(key)}
+    }
+  }
   exportConflict(id:string):string {const op=this.sync?.cache.backups.find(p=>p.id===id)??this.sync?.cache.queue.find(p=>p.id===id);return JSON.stringify(op,null,2)}
   accountCells():Cells{return this.sync?.cache.base.cells??{}}
 }
@@ -182,7 +234,8 @@ export function connectApplication(app:Application){
   void app.auth.current().then(user=>{if(active&&!observed)void restored.then(()=>app.acceptAuth(user))}).catch(error=>{if(active)app.reportError(error)})
   const refresh=()=>{if(document.visibilityState==='visible'&&navigator.onLine)void app.retry().catch(error=>app.reportError(error))}
   const online=()=>app.setOnline(navigator.onLine)
-  window.addEventListener('focus',refresh);window.addEventListener('online',online);window.addEventListener('offline',online)
+  const storage=(event:StorageEvent)=>{if(event.key==='kelime-vocabulary-deletion-journal')app.reloadGuest()}
+  window.addEventListener('focus',refresh);window.addEventListener('online',online);window.addEventListener('offline',online);window.addEventListener('storage',storage)
   const timer=setInterval(refresh,30000)
-  return()=>{active=false;unsubscribe();clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('online',online);window.removeEventListener('offline',online)}
+  return()=>{active=false;unsubscribe();clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('online',online);window.removeEventListener('offline',online);window.removeEventListener('storage',storage)}
 }

@@ -5,7 +5,7 @@ The app works without Supabase configuration. Guest data stays in its existing l
 ## Create a test project
 
 1. Create a project in the Supabase dashboard and retain the database password securely.
-2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`. This is the first ordered migration and must be applied once to a new schema. Use subsequent numbered migrations for deployed changes; do not delete production tables to reapply it.
+2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`, `002_events.sql`, and `003_vocabulary_deletion.sql` in numeric order. Apply each migration once; do not delete production tables to reapply it.
 3. Enable the Email provider with email/password sign-in. Keep email confirmation enabled. Set Authentication → URL Configuration → Site URL to your app origin, for example `http://localhost:5173`. Add the exact development and production URLs to the Redirect URLs allowlist. Signup uses the current origin and pathname; confirmation redirects are handled by the Supabase client.
 4. Copy the project URL and a **public anon or publishable key** from the project connection/API settings. Never put a secret/service-role key or database password in Vite variables.
 5. Copy `.env.example` to `.env.local`, fill these values, and restart Vite:
@@ -86,3 +86,6 @@ These checks require a configured disposable project and remain a deployment gat
 Apply `supabase/migrations/002_events.sql` **after** migration 001; existing installations must not rerun 001. The added RPCs `kelime_snapshot_v2` and `kelime_apply_v2` retain ownership/RLS and transactional receipts, add ordered assessment events, and preserve UUID-addressed sessions and archives. Existing history/activity remains the baseline. The first v2 write upgrades the account and blocks older snapshot writers under the same profile lock. Pending legacy operations remain locally recoverable; ambiguous assessments require conflict review.
 
 Run `npm run db:types` to regenerate TypeScript rows from both executable migrations. `npm test` executes SQL and event scenarios in embedded PostgreSQL without reading `.env.local` or contacting a live project. See [PWA_SETUP.md](PWA_SETUP.md) for IndexedDB migration, acceptance ordering, offline behavior, SQL rollout and the two-device/live authentication checklist. Production offline tests use `npm run build` followed by `npm run test:browser`.
+## Protocol 3 vocabulary deletion
+
+Existing projects must apply `003_vocabulary_deletion.sql` after `001_kelime.sql` and `002_events.sql`; never replace the older migrations. Migration 003 adds per-account hidden built-ins, transactional batch deletion/restoration/reset operations, durable receipts, tombstones, a reset epoch, RLS, and an old-client write lock. The frontend continues to use only the anonymous key.

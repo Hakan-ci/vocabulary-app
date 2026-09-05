@@ -92,3 +92,6 @@ These tests use a local production server, mocked authentication/storage or embe
 - Development and production-preview endpoints returned HTTP 200.
 - Automated accessibility scans passed for the main screens; responsive checks covered 375, 390, 430, 768 and 1024 pixels plus landscape. Mobile and desktop screenshots were inspected.
 - No deployment, live database migration, real authentication flow, or physical iOS/Android installation was performed.
+## Offline deletion guarantees
+
+Vocabulary deletion is committed through the application IndexedDB/local-storage transaction rather than the service worker. Small deletions wait 10 seconds before cloud upload so Undo can survive reload. Offline replay retains the operation’s `notBefore` deadline; reconnecting cannot transmit it early. Built-in exclusions and personal tombstones prevent stale devices from restoring removed live data.

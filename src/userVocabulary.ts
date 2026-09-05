@@ -4,15 +4,18 @@ import { classifyPreview } from './vocabularyImport.ts'
 import type { ImportRow } from './vocabularyImport.ts'
 import { englishKey, compatibleSpeech, validateEntry, creationTime, normalizeTags } from './wordFields.ts'
 import { uniqueAnswers } from './answerMatching.ts'
+import { emptyWordHistory, parseWordHistory } from './learningHistory.ts'
+import type { WordLearningHistory } from './learningHistory.ts'
 export const USER_VOCABULARY_KEY = 'kelime-user-vocabulary'
 export const FIRST_USER_ID = 1_000_000
-export type UserVocabulary = { version: 3; nextId: number; entries: VocabularyWord[]; overrides: Record<number, VocabularyWord>; suppressedBuiltinIds: number[]; legacyEntries: VocabularyWord[]; deletedIds: number[] }
-export const emptyUserVocabulary = (): UserVocabulary => ({ version: 3, nextId: FIRST_USER_ID, entries: [], overrides: {}, suppressedBuiltinIds: [], legacyEntries: [], deletedIds: [] })
+export type HiddenBuiltinArchive = { id:number; hiddenAt:number; history:WordLearningHistory; favorite:boolean }
+export type UserVocabulary = { version: 4; nextId: number; entries: VocabularyWord[]; overrides: Record<number, VocabularyWord>; suppressedBuiltinIds: number[]; hiddenBuiltinIds:number[]; hiddenBuiltinState:Record<number,HiddenBuiltinArchive>; legacyEntries: VocabularyWord[]; deletedIds: number[] }
+export const emptyUserVocabulary = (): UserVocabulary => ({ version: 4, nextId: FIRST_USER_ID, entries: [], overrides: {}, suppressedBuiltinIds: [], hiddenBuiltinIds:[], hiddenBuiltinState:{}, legacyEntries: [], deletedIds: [] })
 export function parseUserVocabulary(value: unknown, builtins: readonly VocabularyWord[] = words): UserVocabulary {
   const result = emptyUserVocabulary()
   if (!value || typeof value !== 'object') return result
   const raw = value as Record<string, unknown>
-  if (![1,2,3].includes(Number(raw.version))) return result
+  if (![1,2,3,4].includes(Number(raw.version))) return result
   if (Number.isSafeInteger(raw.nextId) && Number(raw.nextId) >= FIRST_USER_ID) result.nextId = Number(raw.nextId)
   if (Array.isArray(raw.deletedIds)) result.deletedIds = [...new Set(raw.deletedIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) >= FIRST_USER_ID && Number(id) < Number.MAX_SAFE_INTEGER))]
   for (const id of result.deletedIds) result.nextId = Math.max(result.nextId, id + 1)
@@ -21,7 +24,7 @@ export function parseUserVocabulary(value: unknown, builtins: readonly Vocabular
     if (!item || typeof item !== 'object') continue
     if (Number.isSafeInteger(item.id) && item.id >= FIRST_USER_ID && item.id < Number.MAX_SAFE_INTEGER) result.nextId = Math.max(result.nextId, item.id + 1)
     if (!Number.isSafeInteger(item.id) || item.id < FIRST_USER_ID || item.id >= Number.MAX_SAFE_INTEGER || ids.has(item.id)) continue
-    const entry = validateEntry(raw.version === 3 ? item : {...item, topic: item.topic ?? 'My words'})
+    const entry = validateEntry(Number(raw.version) >= 3 ? item : {...item, topic: item.topic ?? 'My words'})
     if (!entry) continue
     ids.add(item.id); result.entries.push({ ...entry, id: item.id, createdAt: creationTime(item.createdAt) })
   }
@@ -31,14 +34,22 @@ export function parseUserVocabulary(value: unknown, builtins: readonly Vocabular
   else {
     if (Array.isArray(raw.suppressedBuiltinIds)) result.suppressedBuiltinIds = [...new Set(raw.suppressedBuiltinIds.filter(id => typeof id === 'number' && id >= 30 && builtins.some(w => w.id === id)))]
     if (raw.overrides && typeof raw.overrides === 'object') for (const [key,item] of Object.entries(raw.overrides)) {
-      const original = builtins.find(w => w.id === Number(key)), entry = validateEntry(raw.version !== 3 && original && item && typeof item === 'object' ? {...item, topic: original.tags[0]} : item)
+      const original = builtins.find(w => w.id === Number(key)), entry = validateEntry(Number(raw.version) < 3 && original && item && typeof item === 'object' ? {...item, topic: original.tags[0]} : item)
       if (original && entry) result.overrides[original.id] = { ...entry, id: original.id, createdAt: original.createdAt }
     }
+  }
+  if (Number(raw.version) >= 4) {
+    if (Array.isArray(raw.hiddenBuiltinIds)) result.hiddenBuiltinIds=[...new Set(raw.hiddenBuiltinIds.filter((id):id is number=>Number.isSafeInteger(id)&&builtins.some(w=>w.id===id)))]
+    if(raw.hiddenBuiltinState&&typeof raw.hiddenBuiltinState==='object')for(const [key,item] of Object.entries(raw.hiddenBuiltinState)){
+      const id=Number(key),record=item as Partial<HiddenBuiltinArchive>,history=parseWordHistory(record?.history)
+      if(result.hiddenBuiltinIds.includes(id)&&history&&typeof record.favorite==='boolean'&&typeof record.hiddenAt==='number'&&Number.isFinite(record.hiddenAt))result.hiddenBuiltinState[id]={id,history,favorite:record.favorite,hiddenAt:record.hiddenAt}
+    }
+    for(const id of result.hiddenBuiltinIds)result.hiddenBuiltinState[id]??={id,history:emptyWordHistory(),favorite:false,hiddenAt:0}
   }
   return result
 }
 export function combinedCatalog(value: UserVocabulary, builtins: readonly VocabularyWord[] = words): VocabularyWord[] {
-  return [...builtins.filter(w => !value.suppressedBuiltinIds.includes(w.id)).map(w => value.overrides[w.id] ?? w), ...value.entries]
+  return [...builtins.filter(w => !value.suppressedBuiltinIds.includes(w.id)&&!value.hiddenBuiltinIds.includes(w.id)).map(w => value.overrides[w.id] ?? w), ...value.entries]
 }
 export function readUserVocabulary(storage: Pick<Storage, 'getItem'>): UserVocabulary {
   const raw = storage.getItem(USER_VOCABULARY_KEY)
@@ -51,7 +62,7 @@ export function loadUserVocabulary() {
   try {
     value = readUserVocabulary(localStorage)
     const raw = localStorage.getItem(USER_VOCABULARY_KEY)
-    if (raw && [1,2].includes(JSON.parse(raw)?.version)) localStorage.setItem(USER_VOCABULARY_KEY, JSON.stringify(value))
+    if (raw && [1,2,3].includes(JSON.parse(raw)?.version)) localStorage.setItem(USER_VOCABULARY_KEY, JSON.stringify(value))
     return { value, error: false }
   } catch { return { value, error: true } }
 }
