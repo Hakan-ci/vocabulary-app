@@ -15,6 +15,8 @@ try {
  kelime_snapshot_v3: { Args: Record<string,never>; Returns: Json }
  kelime_apply_v3: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot_v4: { Args: Record<string,never>; Returns: Json }
+ kelime_reconcile: { Args: { p_ids: string[] }; Returns: Json }
+ kelime_compact_drafts: { Args: { p_operations: Json; p_batch: string }; Returns: Json }
  kelime_apply_v4: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot: { Args: Record<string,never>; Returns: Json }
  kelime_apply: { Args: { p_operation: Json }; Returns: Json }

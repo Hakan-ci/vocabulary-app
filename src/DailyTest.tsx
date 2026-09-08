@@ -20,13 +20,13 @@ type Props = {
   onAutoPronunciationChange: (value: boolean) => void
   session: TestSession | null
   onStart: () => void
-  onDraft: (value: string) => void
-  onSubmit: () => void
+  draftScope: string
+  onSubmit: (answer: string, identity: string) => boolean
   onAssess: (known: boolean) => void
   onLearned: () => void
 }
 
-export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, onDraft, onSubmit, onAssess, onLearned }: Props) {
+export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, draftScope, onSubmit, onAssess, onLearned }: Props) {
   const summaryRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (session?.phase === 'completed') summaryRef.current?.focus()
@@ -83,5 +83,5 @@ export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronu
     </section>
   }
 
-  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" autoPronunciation={autoPronunciation} onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
+  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
 }

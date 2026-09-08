@@ -45,18 +45,17 @@ export class PronunciationController {
   private listeners = new Set<() => void>()
   private request = 0
   private voices: SpeechVoice[] = []
+  private listening=false
   private snapshot: PronunciationSnapshot
   private readonly onVoicesChanged = () => { this.voices = this.adapter?.getVoices() ?? [] }
 
   private readonly adapter: SpeechAdapter | null
-  constructor(adapter: SpeechAdapter | null = browserSpeechAdapter()) {
+  constructor(adapter: SpeechAdapter | null = browserSpeechAdapter(),listen=true) {
     this.adapter = adapter
     this.snapshot = { isSupported: !!adapter, isSpeaking: false, currentKey: null }
-    if (adapter) {
-      this.voices = adapter.getVoices()
-      adapter.addVoicesChanged(this.onVoicesChanged)
-    }
+    if(listen)this.activate()
   }
+  activate(){if(this.adapter&&!this.listening){this.voices=this.adapter.getVoices();this.adapter.addVoicesChanged(this.onVoicesChanged);this.listening=true}}
 
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   getSnapshot = () => this.snapshot
@@ -95,6 +94,7 @@ export class PronunciationController {
   dispose() {
     this.stop()
     this.adapter?.removeVoicesChanged(this.onVoicesChanged)
+    this.listening=false
     this.listeners.clear()
   }
 }

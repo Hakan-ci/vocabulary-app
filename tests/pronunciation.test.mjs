@@ -66,7 +66,7 @@ test('learning state defaults and migrates automatic pronunciation without affec
 })
 
 test('account caches migrate to protocol 4 and new preference operations use protocol 4',()=>{
-  const legacy={...emptyCache(),version:3};const migrated=parseCache(JSON.stringify(legacy));assert.equal(migrated.version,4)
+  const legacy={...emptyCache(),version:3};const migrated=parseCache(JSON.stringify(legacy));assert.equal(migrated.version,5)
   const storage=memoryStorage(),transport={pull:async()=>({revision:0,cells:{}}),push:async operation=>({conflict:false,snapshot:{revision:1,cells:Object.fromEntries(operation.changes.map(c=>[c.key,c.after]))}})}
   const sync=new SyncService(storage,'pronunciation',transport);sync.setOnline(false);sync.enqueue('preferences',{}, {'setting/auto-pronunciation':false})
   assert.equal(sync.cache.queue[0].protocol,4);sync.dispose()

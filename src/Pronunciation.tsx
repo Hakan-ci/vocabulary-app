@@ -1,14 +1,14 @@
 ﻿import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { PronunciationController } from './pronunciationController'
 import type { SpeakOptions } from './pronunciationController'
-import { PronunciationContext, usePronunciation } from './pronunciationContext'
+import { PronunciationContext, PronunciationActionsContext, usePronunciation } from './pronunciationContext'
 import type { PronunciationContextValue } from './pronunciationContext'
 
 export function PronunciationProvider({ children, controller: supplied }: { children: React.ReactNode; controller?: PronunciationController }) {
-  const [controller] = useState(() => supplied ?? new PronunciationController())
+  const [controller] = useState(() => supplied ?? new PronunciationController(undefined,false))
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   const [seen] = useState(() => new Set<string>())
-  useEffect(() => () => { if (!supplied) controller.dispose() }, [controller, supplied])
+  useEffect(() => {controller.activate();return () => { if (!supplied) controller.dispose() }}, [controller, supplied])
   const autoSpeakOnce = useCallback((key: string, text: string, enabled: boolean, options?: Omit<SpeakOptions, 'key'>) => {
     if (seen.has(key)) return false
     seen.add(key)
@@ -22,7 +22,8 @@ export function PronunciationProvider({ children, controller: supplied }: { chil
     stop,
     autoSpeakOnce,
   }), [snapshot, speak, stop, autoSpeakOnce])
-  return <PronunciationContext.Provider value={value}>{children}</PronunciationContext.Provider>
+  const actions=useMemo(()=>({speak,stop,autoSpeakOnce}),[speak,stop,autoSpeakOnce])
+  return <PronunciationActionsContext.Provider value={actions}><PronunciationContext.Provider value={value}>{children}</PronunciationContext.Provider></PronunciationActionsContext.Provider>
 }
 
 function SpeakerIcon() {

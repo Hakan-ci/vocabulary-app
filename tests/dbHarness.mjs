@@ -6,6 +6,7 @@ export async function database() {
  await db.exec(await readFile(new URL('../supabase/migrations/001_kelime.sql',import.meta.url),'utf8'))
  await db.exec(await readFile(new URL('../supabase/migrations/002_events.sql',import.meta.url),'utf8'))
  await db.exec(await readFile(new URL('../supabase/migrations/003_vocabulary_deletion.sql',import.meta.url),'utf8'))
- await db.exec(await readFile(new URL('../supabase/migrations/004_pronunciation.sql',import.meta.url),'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/004_pronunciation.sql',import.meta.url),'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/005_sync_reliability.sql',import.meta.url),'utf8'))
  return db
 }

@@ -75,6 +75,8 @@ export class Application {
   getSnapshot=()=>this.version
   reportError(error:unknown){this.error=error instanceof Error?error.message:String(error);this.emit()}
   private emit(){this.version++;for(const listener of this.listeners)listener()}
+  get draftScope(){return encodeURIComponent(this.project??'local')+':'+this.scope}
+  private projectedVersion=-1
   get current(){return this.data}
   get configured(){return !!this.project}
   get status(){return !this.online?'Offline':this.scope==='guest'?'Local only':!this.authenticated?'Changes waiting':this.sync?.status??'Sync error'}
@@ -96,15 +98,15 @@ export class Application {
     catch(e){return {cells:this.sync.cache.base.cells,additions:0,historicalAnswers:0,conflicts:[{key:'identity',label:String(e)+' Choose a separate word or another available target.',device:null,account:null}]}}
   }
   private refresh=()=>{
-    if(this.scope!=='guest'&&this.sync){try{this.data=decodeData(projection(this.sync.cache),this.sync.cache.identities);this.applySelections();this.sync.persist(false)}catch(e){this.error=String(e)}}
+    if(this.scope!=='guest'&&this.sync&&this.projectedVersion!==this.sync.dataVersion){try{const nextId=this.sync.cache.identities.nextId;this.data=decodeData(projection(this.sync.cache),this.sync.cache.identities);this.applySelections();if(nextId!==this.sync.cache.identities.nextId)this.sync.persist(false);this.projectedVersion=this.sync.dataVersion}catch(e){this.error=String(e)}}
     this.emit()
   }
   private applySelections(){for(const source of ['daily','review'] as const){const id=this.sync?.cache.selections?.[source],record=id?this.data.learning.sessions?.[id]:undefined;if(record&&!record.archivedAt){if(source==='daily')this.data.learning.session=record.practice;else this.data.learning.reviewSession={version:2,practice:record.practice}}}}
   selectSession(source:'daily'|'review',id:string){const record=this.data.learning.sessions?.[id];if(!record||record.archivedAt)return;if(this.sync&&this.scope!=='guest'){this.sync.cache.selections={...this.sync.cache.selections,[source]:id};this.sync.persist(false)}if(source==='daily')this.data.learning={...this.data.learning,session:record.practice};else this.data.learning={...this.data.learning,reviewSession:{version:2,practice:record.practice}};if(this.scope==='guest'){this.guest=this.data;try{saveLocal(this.storage,this.data)}catch{this.storageError=true}}this.emit()}
   archivePractice(source:'daily'|'review'){const state=this.data.learning,practice=source==='daily'?state.session:state.reviewSession?.practice;if(!practice?.syncId)return;const sessions={...state.sessions,[practice.syncId]:{source,practice,archivedAt:Date.now()}};this.saveLearning({...state,sessions,...(source==='daily'?{session:null}:{reviewSession:null})},'archive')}
   async setUser(user:AccountUser|null,cachedOnly=false) {
-    if(user?.id===this.user?.id&&this.sync){if(!cachedOnly){this.authenticated=true;this.sync.authorized=true;this.sync.setOnline(this.online);this.remember();this.emit()}return}
-    const token=++this.token
+    if(user?.id===this.user?.id&&this.sync){if(!cachedOnly){this.authenticated=true;this.sync.resumeAuthorization();this.sync.setOnline(this.online);this.remember();this.emit()}return}
+    const token=++this.token;this.projectedVersion=-1
     this.stopSync?.();this.sync?.dispose();this.releaseAccount?.();this.releaseAccount=undefined;this.sync=null;this.authenticated=!cachedOnly&&!!user;this.user=user;this.scope='guest';this.data=this.guest;this.migrationOpen=false;this.previewOpen=false;this.error='';this.emit()
     if(!user||!this.project)return
     try {
@@ -119,6 +121,7 @@ export class Application {
       sync.authorized=this.authenticated;this.sync=sync;this.stopSync=sync.subscribe(this.refresh)
       if(sync.cache.initialized&&(sync.cache.migrationChoice||sync.cache.queue.some(op=>op.kind==='migration'&&op.status==='pending'))){this.scope=user.id;this.refresh()}
       sync.offline=!this.online
+      if(this.authenticated)sync.resumeAuthorization()
       if(!this.online||cachedOnly){this.refresh();return}
       await sync.initialize();if(token!==this.token)return
       if(sync.cache.migrationChoice||sync.cache.queue.some(op=>op.kind==='migration'&&op.status==='pending')){this.scope=user.id;sync.schedule()}
@@ -127,7 +130,21 @@ export class Application {
       if(this.scope!=='guest')sync.setOnline(navigator.onLine);this.remember();this.refresh()
     } catch(e){if(token===this.token){this.error=e instanceof Error?e.message:'Account data could not be loaded.';this.emit()}}
   }
-  async retry(){if(!this.authenticated&&this.user&&this.online){await this.acceptAuth(await this.auth.current());if(!this.authenticated)return}if(this.sync?.cache.initialized){if(this.scope==='guest')await this.sync.initialize();else await this.sync.flush();this.refresh()}else{const user=this.user;this.user=null;await this.setUser(user)}}
+  async retry(manual=true){
+    if((!this.authenticated||this.sync?.authorized===false)&&this.user&&this.online){await this.acceptAuth(await this.auth.current());if(!this.authenticated||this.sync?.authorized===false)return}
+    if(this.sync){
+      const sync=this.sync,initialized=sync.cache.initialized
+      await sync.flush(manual)
+      if(this.sync!==sync)return
+      if(!initialized&&sync.cache.initialized&&this.user){
+        if(sync.cache.migrationChoice||sync.cache.queue.some(op=>op.kind==='migration'&&op.status==='pending'))this.scope=this.user.id
+        else if(meaningfulLocal(this.guest))this.migrationOpen=true
+        else{sync.cache.migrationChoice='account';this.scope=this.user.id;sync.persist()}
+        this.remember()
+      }
+      this.refresh()
+    }else{const user=this.user;this.user=null;await this.setUser(user)}
+  }
   beginMigration(){if(!this.sync?.cache.initialized){void this.retry();return}this.migrationOpen=true;this.previewOpen=false;this.emit()}
   chooseAccount(){if(!this.user||!this.sync?.cache.initialized)return;this.sync.cache.migrationChoice='account';this.scope=this.user.id;this.migrationOpen=false;this.previewOpen=false;this.sync.persist();this.sync.setOnline(navigator.onLine);this.remember();this.refresh()}
   cancelMigration(){this.migrationOpen=false;this.previewOpen=false;this.scope='guest';this.data=this.guest;this.emit()}
@@ -155,7 +172,7 @@ export class Application {
   }
   private commit(next:AppData,kind:OperationKind,options:Parameters<SyncService['enqueue']>[3]={}) {
     this.identifySessions(next)
-    if(this.scope==='guest'){this.guest=next;this.data=next;try{saveLocal(this.storage,next);this.storageError=false}catch{this.storageError=true}this.emit();return undefined}
+    if(this.scope==='guest'){const previous=this.data;this.guest=next;this.data=next;try{saveLocal(this.storage,next,previous);this.storageError=false}catch{this.storageError=true}this.emit();return undefined}
     const sync=this.sync!
     const before=projection(sync.cache),after=encodeData(next,sync.cache.identities)
     // Per-device selection is not a mutation of another device's current pointer.
@@ -232,7 +249,7 @@ export function connectApplication(app:Application){
   const restored=app.restoreAccount()
   const unsubscribe=app.auth.subscribe(user=>{observed=true;queueMicrotask(()=>{if(active)void restored.then(()=>app.acceptAuth(user))})})
   void app.auth.current().then(user=>{if(active&&!observed)void restored.then(()=>app.acceptAuth(user))}).catch(error=>{if(active)app.reportError(error)})
-  const refresh=()=>{if(document.visibilityState==='visible'&&navigator.onLine)void app.retry().catch(error=>app.reportError(error))}
+  const refresh=()=>{if(document.visibilityState==='visible'&&navigator.onLine)void app.retry(false).catch(error=>app.reportError(error))}
   const online=()=>app.setOnline(navigator.onLine)
   const storage=(event:StorageEvent)=>{if(event.key==='kelime-vocabulary-deletion-journal')app.reloadGuest()}
   window.addEventListener('focus',refresh);window.addEventListener('online',online);window.addEventListener('offline',online);window.addEventListener('storage',storage)

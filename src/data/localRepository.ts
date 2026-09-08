@@ -28,17 +28,19 @@ export function loadLocal(storage: StorageAccess): {data: AppData; error: boolea
   try { favorites=sanitizeIds(JSON.parse(storage.getItem('kelime-favorites')??'[]'),catalog) } catch { /* Malformed favorites recover independently. */ }
   return {data:{vocabulary,learning:learning.value,favorites},error:learning.error||!cleaned}
 }
-export function saveLocal(storage: StorageAccess,data: AppData) {
+export function saveLocal(storage: StorageAccess,data: AppData,previous?:AppData) {
   // Write one recovery envelope first, then keep the existing keys compatible.
-  storage.setItem('kelime-local-recovery',JSON.stringify(data))
-  storage.setItem(USER_VOCABULARY_KEY,JSON.stringify(data.vocabulary))
-  storage.setItem(LEARNING_STATE_KEY,JSON.stringify(data.learning))
-  storage.setItem('kelime-favorites',JSON.stringify(data.favorites))
+  const entries:Record<string,unknown>={}
+  if(data.vocabulary!==previous?.vocabulary)entries[USER_VOCABULARY_KEY]=data.vocabulary
+  if(data.learning!==previous?.learning)entries[LEARNING_STATE_KEY]=data.learning
+  if(data.favorites!==previous?.favorites)entries['kelime-favorites']=data.favorites
+  storage.setItem('kelime-local-recovery',JSON.stringify({version:2,entries}))
+  for(const [key,value] of Object.entries(entries))storage.setItem(key,JSON.stringify(value))
   storage.setItem('kelime-local-recovery','null')
 }
 export function recoverLocal(storage: StorageAccess) {
   const raw=storage.getItem('kelime-local-recovery')
-  if(raw&&raw!=='null') { const pending=JSON.parse(raw); if(pending?.vocabulary&&pending?.learning&&Array.isArray(pending.favorites)) saveLocal(storage,pending) }
+  if(raw&&raw!=='null') { const pending=JSON.parse(raw); if(pending?.version===2&&pending.entries){for(const key of [USER_VOCABULARY_KEY,LEARNING_STATE_KEY,'kelime-favorites'])if(key in pending.entries)storage.setItem(key,JSON.stringify(pending.entries[key]));storage.setItem('kelime-local-recovery','null')}else if(pending?.vocabulary&&pending?.learning&&Array.isArray(pending.favorites)) saveLocal(storage,pending) }
 }
 export const vocabularyRepository = {
   import(data: AppData,rows: ImportRow[]) { const result=saveImportedWords(memoryStorage(data),rows);return {data:{...data,vocabulary:result.value,learning:{...data.learning,history:parseHistory(data.learning.history,false,combinedCatalog(result.value))}},added:result.added.length,updated:result.updated.length} },

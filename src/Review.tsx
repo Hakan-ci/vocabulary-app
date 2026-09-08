@@ -9,9 +9,9 @@ import { modeLabels } from './learningTypes'
 import { PracticeQuestion } from './PracticeQuestion'
 import { AutoPronunciationSetting, PronunciationButton } from './Pronunciation'
 
-type Props = { history: LearningHistory; now:number; catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; autoPronunciation:boolean; onAutoPronunciationChange:(value:boolean)=>void; onStart: () => void; onDraft: (draft: string) => void; onSubmit: () => void; onAssess: (known: boolean) => void }
+type Props = { history: LearningHistory; now:number; catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; autoPronunciation:boolean; onAutoPronunciationChange:(value:boolean)=>void; onStart: () => void; draftScope: string; onSubmit: (answer: string, identity: string) => boolean; onAssess: (known: boolean) => void }
 const groups: ReviewGroup[] = ['Needs Review', 'Overdue', 'Due today', 'Next scheduled reviews']
-export function Review({ history, now, catalog, queue, session, autoPronunciation, onAutoPronunciationChange, onStart, onDraft, onSubmit, onAssess }: Props) {
+export function Review({ history, now, catalog, queue, session, autoPronunciation, onAutoPronunciationChange, onStart, draftScope, onSubmit, onAssess }: Props) {
   const [showPractice, setShowPractice] = useState(true)
   const summaryRef = useRef<HTMLHeadingElement>(null)
   const practice = session?.practice
@@ -20,7 +20,7 @@ export function Review({ history, now, catalog, queue, session, autoPronunciatio
   useEffect(() => { if (practice?.phase === 'completed') summaryRef.current?.focus() }, [practice?.phase])
   if (active && showPractice) return <div className="review-page">
     <button className="secondary-button review-back" onClick={() => setShowPractice(false)}>Back to queue</button>
-    <PracticeQuestion history={history} now={now} catalog={catalog} session={practice} label="Review" autoPronunciation={autoPronunciation} onDraft={onDraft} onSubmit={onSubmit} onAssess={onAssess} />
+    <PracticeQuestion history={history} now={now} catalog={catalog} session={practice} label="Review" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
   </div>
   const summary = practice?.phase === 'completed' ? sessionSummary(practice, catalog) : null
   const pairs = (ids: number[]) => <ul className="learned-summary">{ids.map(id => {

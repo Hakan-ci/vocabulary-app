@@ -1,4 +1,5 @@
 import { PracticeResume } from './PracticeResume'
+import { pruneDrafts } from './localDrafts'
 import { PwaProvider, UpdateNotice } from './Pwa'
 import { MobileNavigation } from './MobileNavigation'
 import { ScreenBoundary } from './ScreenBoundary'
@@ -22,7 +23,7 @@ const AddVocabulary = lazy(() => import('./AddVocabulary').then(module => ({defa
 import type { EntryMode } from './AddVocabulary'
 import { combinedCatalog } from './userVocabulary'
 import type { ImportRow } from './vocabularyImport'
-import { useState, useEffect, useSyncExternalStore, lazy, Suspense } from 'react'
+import { useState, useMemo, useEffect, useSyncExternalStore, lazy, Suspense } from 'react'
 const Account = lazy(() => import('./Account').then(module => ({default:module.Account})))
 import { application, connectApplication } from './data/application'
 import type { Application } from './data/application'
@@ -35,7 +36,7 @@ import { WordDifficulty } from './WordDifficulty'
 import type { TestMode } from './learningTypes'
 import { useReviewClock } from './useReviewClock'
 import { PronunciationButton, PronunciationProvider } from './Pronunciation'
-import { usePronunciation } from './pronunciationContext'
+import { usePronunciationActions } from './pronunciationContext'
 
 function Icon({ name, size = 20 }: { name: 'book' | 'star' | 'search' | 'leaf'; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -55,7 +56,7 @@ export function ApplicationView({app}: {app: Application}) {
   return <PronunciationProvider><PwaProvider><Workspace key={app.scope} app={app} /></PwaProvider></PronunciationProvider>
 }
 function Workspace({app}: {app: Application}) {
-  const { stop: stopPronunciation } = usePronunciation()
+  const { stop: stopPronunciation } = usePronunciationActions()
   const [view, setView] = useState<'all' | 'favorites' | 'test' | 'review' | 'learned' | 'progress' | 'account'>('all')
   const [search, setSearch] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
@@ -64,7 +65,7 @@ function Workspace({app}: {app: Application}) {
   const [selected,setSelected]=useState<Set<number>>(()=>new Set())
   const [sort, setSort] = useState<CatalogSort>('default')
   const userStore = { value: app.current.vocabulary }
-  const words = combinedCatalog(userStore.value)
+  const words = useMemo(() => combinedCatalog(userStore.value), [userStore.value])
   const [editingWord, setEditingWord] = useState<VocabularyWord | undefined>()
   const [entryMode, setEntryMode] = useState<EntryMode | null>(null)
   const [importNotice, setImportNotice] = useState('')
@@ -72,11 +73,16 @@ function Workspace({app}: {app: Application}) {
   const learningStore = { value: app.current.learning, current: { get current() { return app.current.learning } }, save: (state: typeof app.current.learning) => app.saveLearning(state) }
   const clock = useReviewClock()
   const favorites = favoritesStore.value
-  const history = learningStore.value.history
-  const learned = learnedIds(history, words)
-  const queue = reviewQueue(words, history, clock.now)
+  const history = app.current.learning.history
+  const learned = useMemo(() => learnedIds(history, words), [history, words])
+  const queue = useMemo(() => reviewQueue(words, history, clock.now), [words, history, clock.now])
   const reviewCount = queue.filter(entry => entry.selected.due).length
   const session = learningStore.value.session
+  const sessions=learningStore.value.sessions
+  const reviewSession=learningStore.value.reviewSession
+  useEffect(()=>{
+    pruneDrafts(app.draftScope,[...Object.values(sessions??{}),...(session?[{source:'daily' as const,practice:session}]:[]),...(reviewSession?[{source:'review' as const,practice:reviewSession.practice}]:[])])
+  },[app,sessions,session,reviewSession])
   const storageError = app.storageError || app.sync?.storageError
   const toggleFavorite = (id: number) => {
     const current = favoritesStore.current.current
@@ -93,13 +99,11 @@ function Workspace({app}: {app: Application}) {
   }
   const setMode = (preferredMode: TestMode) => learningStore.save({ ...learningStore.current.current, preferredMode })
   const setAutoPronunciation = (autoPronunciation: boolean) => learningStore.save({ ...learningStore.current.current, autoPronunciation })
-  const updateDraft = (draft: string) => {
+  const submit = (answer: string, identity: string) => {
     const current = learningStore.current.current
-    if (current.session?.phase === 'answering') learningStore.save({ ...current, session: { ...current.session, draft } })
-  }
-  const submit = () => {
-    const current = learningStore.current.current
-    if (current.session?.phase === 'answering') learningStore.save({ ...current, session: submitAnswer(current.session) })
+    if (current.session?.phase !== 'answering' || `${current.session.syncId ?? 'legacy'}:${current.session.index}` !== identity) return false
+    learningStore.save({ ...current, session: submitAnswer({...current.session, draft:answer}) })
+    return true
   }
   const assess = (known: boolean) => {
     const current = learningStore.current.current
@@ -114,15 +118,12 @@ function Workspace({app}: {app: Application}) {
     if (reviewSession) learningStore.save({ ...current, reviewSession })
     clock.refresh()
   }
-  const reviewDraft = (draft: string) => {
+  const reviewSubmit = (answer: string, identity: string) => {
     const current = learningStore.current.current
     const review = current.reviewSession
-    if (review?.practice.phase === 'answering') learningStore.save({ ...current, reviewSession: { ...review, practice: { ...review.practice, draft } } })
-  }
-  const reviewSubmit = () => {
-    const current = learningStore.current.current
-    const review = current.reviewSession
-    if (review?.practice.phase === 'answering') learningStore.save({ ...current, reviewSession: { ...review, practice: submitAnswer(review.practice) } })
+    if (review?.practice.phase !== 'answering' || `${review.practice.syncId ?? 'legacy'}:${review.practice.index}` !== identity) return false
+    learningStore.save({ ...current, reviewSession: { ...review, practice: submitAnswer({...review.practice,draft:answer}) } })
+    return true
   }
   const reviewAssess = (known: boolean) => {
     const current = learningStore.current.current
@@ -178,7 +179,7 @@ function Workspace({app}: {app: Application}) {
         {storageError && <p className="storage-notice" role="status">Your browser couldn’t read or save some learning data. You can keep practicing, but changes may not survive a refresh.</p>}
         {app.migrationOpen && view !== 'account' && <p className="storage-notice">We found learning data on this device. <button className="secondary-button" onClick={() => changeView('account')}>Review synchronization options</button></p>}
         {(view==='test'||view==='review')&&app.isProvisional(view==='test'?'daily':'review')&&<p className="network-notice">These results are provisional until synchronization finishes.</p>}
-        {view === 'account' ? <Account app={app} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} /> : view === 'progress' ? <Progress data={dashboard(words, history, favorites, learningStore.value.activity, clock.now)} goal={learningStore.value.dailyGoal} onGoal={setGoal} onReview={() => changeView('review')} /> : view === 'review' ? <PracticeResume key="review" app={app} source="review" onStart={startReview}><Review history={history} now={clock.now} catalog={words} queue={queue} session={learningStore.value.reviewSession} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} onStart={startReview} onDraft={reviewDraft} onSubmit={reviewSubmit} onAssess={reviewAssess} /></PracticeResume> : view === 'test' ? <PracticeResume key="daily" app={app} source="daily" onStart={startTest}><DailyTest history={history} now={clock.now} catalog={words} mode={learningStore.value.preferredMode} onModeChange={setMode} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} session={session} onStart={startTest} onDraft={updateDraft} onSubmit={submit} onAssess={assess} onLearned={() => changeView('learned')} /></PracticeResume> : <>
+        {view === 'account' ? <Account app={app} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} /> : view === 'progress' ? <Progress data={dashboard(words, history, favorites, learningStore.value.activity, clock.now)} goal={learningStore.value.dailyGoal} onGoal={setGoal} onReview={() => changeView('review')} /> : view === 'review' ? <PracticeResume key="review" app={app} source="review" onStart={startReview}><Review history={history} now={clock.now} catalog={words} queue={queue} session={learningStore.value.reviewSession} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} onStart={startReview} draftScope={app.draftScope} onSubmit={reviewSubmit} onAssess={reviewAssess} /></PracticeResume> : view === 'test' ? <PracticeResume key="daily" app={app} source="daily" onStart={startTest}><DailyTest history={history} now={clock.now} catalog={words} mode={learningStore.value.preferredMode} onModeChange={setMode} autoPronunciation={learningStore.value.autoPronunciation} onAutoPronunciationChange={setAutoPronunciation} session={session} onStart={startTest} draftScope={app.draftScope} onSubmit={submit} onAssess={assess} onLearned={() => changeView('learned')} /></PracticeResume> : <>
         <section className="featured" aria-label="Featured word"><div className="featured-copy"><div className="featured-label"><span>✧</span> A WORD TO INSPIRE YOU</div><div className="featured-word">Discover <span>verb</span></div><div className="featured-translation" lang="tr">Keşfetmek</div><p>“There is always something new to discover.”</p></div><div className="word-art" aria-hidden="true"><span className="art-spark spark-one">✧</span><div className="art-card art-back"><span>Merhaba</span><small>A world of possibilities</small></div><div className="art-card art-front"><Icon name="leaf" size={26} /><span>Hello<span className="art-dot">.</span></span><small>It starts with a word.</small></div><span className="art-spark spark-two">✦</span></div></section>
         <section className="vocabulary" aria-labelledby="vocabulary-heading">
           <div className="section-heading"><div><h2 id="vocabulary-heading">{view === 'learned' ? 'Your learned words' : view === 'all' ? 'Your vocabulary' : 'Your favorites'} <span>{view === 'all' ? words.length : view === 'learned' ? learned.length : favorites.length}</span></h2><p>{view === 'all' ? 'Explore, save, and make these words your own.' : 'A little collection for your next learning moment.'}</p></div>{view === 'all' && <div className="entry-actions"><button className="secondary-button" onClick={() => { setSelecting(false);setSelected(new Set());setEditingWord(undefined); setEntryMode('single'); setImportNotice('') }}>Add Word</button><button className="primary-button" onClick={() => { setSelecting(false);setSelected(new Set());setEditingWord(undefined); setEntryMode('bulk'); setImportNotice('') }}>Bulk Add</button><button className="secondary-button" aria-pressed={selecting} onClick={()=>{setEntryMode(null);setEditingWord(undefined);setSelecting(true)}}>Select</button></div>}</div>

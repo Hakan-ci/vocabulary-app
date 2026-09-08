@@ -10,7 +10,11 @@ export class IndexedAccountStore implements AccountStore {
  async load(key:string,legacy:StorageAccess){
   const db=await this.open()
   const stored=await new Promise<string|undefined>((resolve,reject)=>{const tx=db.transaction('accounts','readonly'),request=tx.objectStore('accounts').get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})
-  if(stored!==undefined)return parseCache(stored)
+  if(stored!==undefined){
+    const cache=parseCache(stored)
+    if(JSON.parse(stored).version!==5)await new Promise<void>((resolve,reject)=>{const tx=db.transaction('accounts','readwrite');tx.objectStore('accounts').put(stored,key+':pre-v5');tx.objectStore('accounts').put(JSON.stringify(cache),key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error)})
+    return cache
+  }
   const cache=parseCache(legacy.getItem(key))
   // The account record itself is the migration receipt. Never erase the legacy backup.
   await this.save(key,cache)

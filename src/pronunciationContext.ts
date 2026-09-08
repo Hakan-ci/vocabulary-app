@@ -11,6 +11,8 @@ export type PronunciationContextValue = {
 }
 
 export const PronunciationContext = createContext<PronunciationContextValue | null>(null)
+export const PronunciationActionsContext = createContext<Pick<PronunciationContextValue,'speak'|'stop'|'autoSpeakOnce'> | null>(null)
+export function usePronunciationActions(){const value=useContext(PronunciationActionsContext);if(!value)throw Error('Pronunciation provider required');return value}
 
 export function usePronunciation() {
   const value = useContext(PronunciationContext)
