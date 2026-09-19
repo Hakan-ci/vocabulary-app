@@ -167,3 +167,7 @@ Kelime now precaches its production app shell and lazy screens, offers optional 
 Account caches/outboxes migrate transactionally to IndexedDB while retaining the original localStorage recovery copies. Guest storage stays unchanged. Protocol-2 SQL merges distinct assessment events exactly once and preserves separate UUID sessions. Apply `002_events.sql` after `001_kelime.sql` before using cloud synchronization with this client; no live project was modified by this implementation.
 
 See [PWA_SETUP.md](PWA_SETUP.md) for installation, offline testing, icon regeneration, hosting headers, SQL rollout, automated verification and physical-device checks. Run `npm run build` then `npm run test:browser` for production-browser verification (`msedge` channel by default). Run `npm run icons` after changing the source SVG.
+
+## Optional mock AI practice
+
+After a completed Daily Test, choose **Practice with AI** for typed Voice Answer simulation, Use the Word, or Conversation. All practice and suggested review requests stay in memory; no AI service or microphone is connected. Existing quiz scoring, learning history, and Review remain unchanged. See [AI practice architecture](AI_PRACTICE.md) for behavior, boundaries, tests, and future integration work.

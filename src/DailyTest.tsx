@@ -24,9 +24,10 @@ type Props = {
   onSubmit: (answer: string, identity: string) => boolean
   onAssess: (known: boolean) => void
   onLearned: () => void
+  onPracticeAI: () => void
 }
 
-export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, draftScope, onSubmit, onAssess, onLearned }: Props) {
+export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, draftScope, onSubmit, onAssess, onLearned, onPracticeAI }: Props) {
   const summaryRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (session?.phase === 'completed') summaryRef.current?.focus()
@@ -79,7 +80,7 @@ export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronu
       })}</ul>}
       <DirectionSetting mode={mode} onChange={onModeChange} />
       <AutoPronunciationSetting checked={autoPronunciation} onChange={onAutoPronunciationChange} compact />
-      <div className="test-actions"><button className="primary-button" onClick={onStart}>Start another test</button><button className="secondary-button" onClick={onLearned}>View Learned</button></div>
+      <div className="test-actions"><button className="primary-button" onClick={onStart}>Start another test</button><button className="secondary-button" onClick={onLearned}>View Learned</button><button className="secondary-button" onClick={onPracticeAI}>Practice with AI</button></div>
     </section>
   }
 
