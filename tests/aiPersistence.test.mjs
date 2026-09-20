@@ -151,3 +151,48 @@ test('request ordering keeps misses and migrated eligibility first, deterministi
  const session=createReviewSession(catalog,history,now,()=>0,requests),questions=structuredClone(session.practice.questions)
  const extra={...a,id:crypto.randomUUID(),wordId:3};requests[extra.id]=extra;assert.deepEqual(session.practice.questions,questions);assert.equal(session.practice.questions.some(q=>q.wordId===3),false)
 })
+
+test('UUID-shaped malformed cloud word references are dropped without allocating identities or losing valid evidence',async()=>{
+ const {app,session}=await guest();await app.completeAIPractice(session)
+ const original=encodeData(app.current,emptyIdentities())
+ for(const ref of ['u:'+'-'.repeat(36),'u:'+'a'.repeat(36),'u:1234567-12345-1234-1234-123456789012']){
+  const badId=crypto.randomUUID(),map=emptyIdentities(),before=structuredClone(map)
+  const cells={...original,['ai-evidence/'+badId]:{...original['ai-evidence/'+session.id],id:badId,words:[{...original['ai-evidence/'+session.id].words[0],wordId:ref}]}}
+  const recovered=decodeData(cells,map)
+  assert.equal(recovered.learning.aiEvidence[badId],undefined,ref)
+  assert.deepEqual(recovered.learning.aiEvidence,app.current.learning.aiEvidence)
+  assert.deepEqual(recovered.learning.history,app.current.learning.history)
+  assert.deepEqual(map,before)
+ }
+})
+test('guest recovery restores evidence and confirmed requests after envelope success but primary learning write failure',async()=>{
+ for(const checkpoint of ['evidence','request']){
+  const memory=memoryStorage();let fail=false
+  const storage={getItem:memory.getItem,setItem(key,value){if(fail&&key==='kelime-learning-state')throw Error('Interrupted primary write');memory.setItem(key,value)}}
+  const app=new Application(storage);app.saveLearning(learnedQuiz());const session=await practice(app.current.learning),wordId=session.targets[0].wordId
+  if(checkpoint==='request')await app.completeAIPractice(session)
+  const history=structuredClone(app.current.learning.history),activity=structuredClone(app.current.learning.activity)
+  fail=true
+  await assert.rejects(()=>checkpoint==='evidence'?app.completeAIPractice(session):app.requestReview(session.id,[wordId]))
+  assert.notEqual(memory.getItem('kelime-local-recovery'),'null')
+  const expectedEvidence=structuredClone(app.current.learning.aiEvidence),expectedRequests=structuredClone(app.current.learning.reviewRequests)
+  fail=false;const recovered=new Application(storage)
+  assert.deepEqual(recovered.current.learning.aiEvidence,expectedEvidence);assert.deepEqual(recovered.current.learning.reviewRequests,expectedRequests)
+  assert.deepEqual(recovered.current.learning.history,history);assert.deepEqual(recovered.current.learning.activity,activity)
+  await recovered.completeAIPractice(session)
+  if(checkpoint==='request')await recovered.requestReview(session.id,[wordId])
+  assert.deepEqual(recovered.current.learning.aiEvidence,expectedEvidence);assert.deepEqual(recovered.current.learning.reviewRequests,expectedRequests)
+  assert.equal(memory.getItem('kelime-local-recovery'),'null')
+ }
+})
+test('concurrent overlapping confirmations retain all selections once without changing mastery or activity',async()=>{
+ const {app}=await guest(),state=app.current.learning
+ const service=new PracticeService({quiz:state.session,history:state.history,catalog:words,mode:'voiceAnswer',provider:new MockPracticeProvider()})
+ await service.start();await service.submit('wrong');await service.submit('wrong');await service.end()
+ const session=service.getSnapshot(),ids=session.feedback.suggestedReviewWordIds,history=structuredClone(state.history),activity=structuredClone(state.activity)
+ assert.equal(ids.length,2);await app.completeAIPractice(session)
+ await Promise.all([app.requestReview(session.id,[ids[0]]),app.requestReview(session.id,ids),app.requestReview(session.id,[ids[1]])])
+ assert.deepEqual(Object.values(app.current.learning.reviewRequests).map(r=>r.wordId).sort((a,b)=>a-b),[...ids].sort((a,b)=>a-b))
+ assert.deepEqual(app.current.learning.history,history);assert.deepEqual(app.current.learning.activity,activity)
+ service.dispose()
+})

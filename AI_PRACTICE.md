@@ -343,3 +343,54 @@ tests/dbHarness.mjs
 ```
 
 The persistence-phase implementation was preserved. The working tree was clean when Phase 5A implementation began; this inventory describes only Phase 5A changes. No live deployment or database migration was performed. Work stops at text-provider integration; Phase 5B audio/voice and persistent conversation work remain separate.
+
+## Persistence audit and targeted fixes (2026-09-20)
+
+This audit rechecked the persistence-phase requirements against the current implementation while preserving Phase 5A. It did not reimplement persistence, change assessment semantics, call a provider, enable the pilot, or deploy anything. Learning state remains 7, account cache 6, and synchronization protocol 5.
+
+### Confirmed requirements and evidence
+
+| Requirement | Implementation and verification evidence |
+| --- | --- |
+| Compact completion evidence, explicit request confirmation | `Application.completeAIPractice` revalidates final feedback and commits only its evidence key; `requestReview` requires durable evidence, validates selected suggestions/current vocabulary and commits only new request keys. `PracticeFeedback` saves completion once and keeps Add Selected to Review separate. Unit and production-browser tests assert checkpoint-only writes and unchanged history. |
+| No transcript/draft persistence | `compactEvidence` explicitly selects outcomes, direction, evaluator, epoch and references. It excludes turns, learner answers, explanations, corrections and strengths. Provider/service tests and production browser write instrumentation verify this boundary. Existing deterministic quiz answers retain their previous behavior. |
+| Guest durability and recovery | `saveLocal` writes the recovery envelope before primary keys. Commands reject failed storage writes; retries retain stable evidence/request identities. A new test interrupts the primary learning write after a successful envelope write at both checkpoints, reconstructs `Application`, and verifies complete recovery, no duplicate records, and unchanged history/activity. |
+| Account durability, offline behavior and scope isolation | `IndexedAccountStore.save` resolves on transaction completion; `practiceDurable` waits for `SyncService.whenDurable` and distinguishes pending sync from synchronization. Existing tests cover failed IndexedDB writes, preserved operation IDs, reload, sign-out and captured-scope rejection. |
+| Idempotent bounded outbox operations | AI completion/request operations use protocol 5 and a captured epoch, remain event barriers, and depend on source-session/evidence operations. Existing tests cover lost responses, replayed wire payloads, one operation per checkpoint/batch, and stable request IDs. A new overlapping-confirmation test verifies concurrent batches retain the union of selected suggestions once without changing mastery/activity. |
+| Review eligibility and ordering | Shared eligibility combines normal scheduling and active requests for catalog filters, counts, attention indicators and Review. `reviewQueue` selects one direction per word; misses take precedence, then directional difficulty, effective deadline and English→Turkish ties. Queue groups retain misses, migrated eligibility, due entries and upcoming entries. Existing tests cover overlapping normal/request eligibility, opposite directions and fixed active question sets. |
+| Authoritative observed-request resolution | `assessReviewState` captures active IDs for the assessed word/direction in the finalized Review result. Optimistic projection and SQL derive resolution from that result in the same assessment operation. SQL verifies ownership, direction, word and epoch. Existing PGlite tests cover Known and Missed, two-device assessments, unseen concurrent requests, idempotent replay, rejection of Daily Test resolution, and terminal-state preservation. |
+| Versioning and malformed-record recovery | Versions 1–6 load empty AI collections and epoch zero. New records are parsed independently. Valid evidence, quiz/history and vocabulary survive malformed neighboring records. This audit tightened malformed cloud UUID rejection as described below. |
+| Word identity and imports | Evidence/request word references explicitly encode/decode as `b:<ID>` or `u:<UUID>`; practice/request/assessment UUIDs are not vocabulary IDs. Existing tests cover different local numeric namespaces, linked guest imports, lifecycle merges, dataset receipts, revision checks, cross-account denial and imported resolution provenance. |
+| Delete/hide, Undo, restoration and reset | Deletion cancels affected requests; server cleanup includes requests absent from the initiating cache. Ordinary restoration keeps terminal requests terminal; short Undo restores the prior state. Progress reset/clear-all remove AI records and advance the epoch; stale AI commands remain rejected through the conflict path. Existing unit/PGlite tests cover these cases and historical evidence retention without vocabulary resurrection. |
+| Accurate UI success/failure | UI waits for command durability, disables duplicate pending submissions, preserves choices after failure and offers retry. Existing AI browser tests cover evidence/request failures, unchecked selections, duplicate clicks, leaving an unsaved failure and cancellation. Production tests reload requests into normal Review and resolve them by assessment. |
+| Database security and compatibility | Existing migrations 006/007 retain validated namespaces, ownership/RLS, immutable evidence, transactional rollback, receipts, old-endpoint gates and legacy-queue dispatch. PGlite regression suites include populated-005 migration, cross-account denial, malformed batches, reconciliation and draft compaction. No SQL change was necessary for this audit. |
+
+### Defect reproduced and corrected
+
+The cloud decoder previously accepted any 36-character combination of hexadecimal digits and hyphens after `u:`. For example, 36 hyphens were accepted as a UUID, allocated a local vocabulary identity, and allowed an otherwise structurally valid historical evidence record to survive recovery.
+
+A regression test first reproduced the failure. `localId` now requires the UUID's 8-4-4-4-12 hexadecimal group structure before allocating an identity. Three malformed forms are tested. Recovery drops the bad evidence independently, preserves valid evidence/history, and leaves the identity map unchanged. Existing valid identity round trips remain covered. No UUID-version restriction was introduced, so existing valid UUID identities remain compatible.
+
+### Exact audit file inventory
+
+Modified only:
+
+- `src/data/codec.ts`: strict cloud word UUID structure validation.
+- `tests/aiPersistence.test.mjs`: malformed-reference regression, interrupted guest checkpoint recovery, and concurrent overlapping confirmations (18 persistence-domain cases total).
+- `AI_PRACTICE.md`: this requirements-to-evidence audit and completion record.
+
+No files or migrations were created. Database types were not regenerated because the database schema and RPC contracts did not change. Existing deployment requirements through migration 007 still apply; this correction adds no database deployment step. Phase 5A remains unchanged and disabled by default. Hosted Supabase configuration, real model quality and physical-device behavior remain outside this local audit.
+
+### Audit verification results
+
+| Command | Result |
+| --- | --- |
+| `node tests/aiPersistence.test.mjs` with Node 24 | Regression reproduced before the decoder fix; all 18 cases passed after the fix |
+| `npm test` with Node 24 | All 22 test files passed, including PGlite database, migration and sync suites |
+| `npm run lint` | Passed without warnings |
+| `npm run build` | TypeScript checks, production bundle and PWA generation passed |
+| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser` | All 16 production browser tests passed |
+| `PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts --output=/tmp/persistence-audit-ai-results` | All 8 isolated AI browser tests passed |
+| `git diff --check` | Passed |
+
+No tests were skipped or weakened. Browser execution required sandbox permission to launch local servers and Chromium; permission was granted and both suites completed. No unresolved local verification blockers remain. The unchanged configuration examples still specify `VITE_AI_PRACTICE_PROVIDER=mock` and `AI_PRACTICE_ENABLED=false`. Live provider evaluation, hosted deployment and audio integration were not attempted, as required by the audit scope.

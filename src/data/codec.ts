@@ -14,7 +14,7 @@ export function reference(id: number,map: IdentityMap): string {
 }
 export function localId(ref: string,map: IdentityMap): number {
   if(/^b:\d+$/.test(ref))return Number(ref.slice(2))
-  if(!/^u:[0-9a-f-]{36}$/i.test(ref))throw Error('Invalid vocabulary identity received.')
+  if(!/^u:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref))throw Error('Invalid vocabulary identity received.')
   const uuid=ref.slice(2),found=Object.entries(map.localToCloud).find(([,v])=>v===uuid)
   if(found)return Number(found[0])
   while(map.localToCloud[map.nextId])map.nextId++
