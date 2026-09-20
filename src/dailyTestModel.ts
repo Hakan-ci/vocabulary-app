@@ -13,7 +13,7 @@ import { selectQuestions } from './adaptiveSelection.ts'
 import type { TestQuestion } from './adaptiveSelection.ts'
 export type { TestQuestion } from './adaptiveSelection.ts'
 export type QuestionSnapshot = TestQuestion & { snapshot: { word: VocabularyWord; prompt: string; acceptedAnswers: string[]; rule: MatchingRule } }
-export type TestResult = QuestionSnapshot & { answer: string; known: boolean; correct: boolean; eventId?: string; answeredAt?: number | null; activityDate?: string | null }
+export type TestResult = QuestionSnapshot & { answer: string; known: boolean; correct: boolean; resolvedReviewRequestIds?:string[]; eventId?: string; answeredAt?: number | null; activityDate?: string | null }
 export type CompletionSnapshot = {
   needsReviewIds: number[]
   hardest: (TestQuestion & Difficulty)[]
@@ -114,7 +114,7 @@ export function parseSession(value: unknown, catalog: readonly VocabularyWord[] 
   } else {
     snapshots = questions.map(q => snapshotQuestion(q, legacyCatalog.some(w => w.id === q.wordId) ? legacyCatalog : catalog, () => 0, 'legacy'))
   }
-  const results: TestResult[] = raw.results.map((r, i) => ({ ...snapshots[i], answer: r.answer, known: r.known, correct: raw.version === 4 ? r.correct : questionMatches(r.answer, snapshots[i]), ...(typeof r.eventId === 'string' ? {eventId:r.eventId} : {}), ...(r.answeredAt !== undefined ? {answeredAt: creationTime(r.answeredAt)} : {}), ...(typeof r.activityDate === 'string' ? {activityDate:r.activityDate} : {}) }))
+  const results: TestResult[] = raw.results.map((r, i) => ({ ...snapshots[i], answer: r.answer, known: r.known, correct: raw.version === 4 ? r.correct : questionMatches(r.answer, snapshots[i]), ...(Array.isArray(r.resolvedReviewRequestIds)&&r.resolvedReviewRequestIds.every((id:unknown)=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))?{resolvedReviewRequestIds:[...new Set(r.resolvedReviewRequestIds)] as string[]} : {}), ...(typeof r.eventId === 'string' ? {eventId:r.eventId} : {}), ...(r.answeredAt !== undefined ? {answeredAt: creationTime(r.answeredAt)} : {}), ...(typeof r.activityDate === 'string' ? {activityDate:r.activityDate} : {}) }))
   const submittedCorrect = raw.phase === 'feedback' ? raw.version === 4 ? raw.submittedCorrect as boolean : questionMatches(raw.submittedAnswer, snapshots[Number(raw.index)]) : null
 
   if (!validSubset(raw.newlyLearnedIds, results.filter(r => r.known).map(r => r.wordId))) return null

@@ -7,14 +7,14 @@ import type {StorageAccess} from './localRepository.ts'
 import {migrateQueue,coalesceTail} from './queueMigration.ts'
 import {classifySyncError} from './syncErrors.ts'
 export const cacheKey=(project:string,user:string)=>`kelime-account:${encodeURIComponent(project)}:${user}:v1`
-export const emptyCache=():SyncCache=>({version:5,identities:emptyIdentities(),base:{revision:0,cells:{}},queue:[],backups:[],initialized:false})
-export function diffCells(before:Cells,after:Cells):Change[]{return [...new Set([...Object.keys(before),...Object.keys(after)])].filter(key=>!equal(before[key],after[key])).map(key=>({key,before:before[key]??null,after:after[key]??null}))}
+export const emptyCache=():SyncCache=>({version:6,identities:emptyIdentities(),base:{revision:0,cells:{}},queue:[],backups:[],initialized:false})
+export function diffCells(before:Cells,after:Cells):Change[]{return [...new Set([...Object.keys(before),...Object.keys(after)])].filter(key=>key==='learning/epoch' ? (before[key]??0)!==(after[key]??0) : !equal(before[key],after[key])).map(key=>({key,before:before[key]??null,after:after[key]??null}))}
 export function applyChanges(cells:Cells,changes:Change[]):Cells{const next={...cells};for(const c of changes){if(c.after===null)delete next[c.key];else next[c.key]=c.after}return next}
 export function projection(cache:SyncCache):Cells{return cache.queue.filter(op=>op.status!=='conflict'&&!op.blockedBy).reduce((cells,op)=>projectOperation(cells,op),cache.base.cells)}
 export function parseCache(raw:string|null):SyncCache{
   if(!raw)return emptyCache()
   const value=JSON.parse(raw) as SyncCache
-  if(![1,2,3,4,5].includes(value.version)||!value.base?.cells||typeof value.base.cells!=='object'||Array.isArray(value.base.cells)||!Number.isSafeInteger(value.base.revision)||value.base.revision<0||!value.identities?.localToCloud||!Array.isArray(value.queue)||!Array.isArray(value.backups)||typeof value.initialized!=='boolean'||value.migrationChoice!==undefined&&!['account','imported'].includes(value.migrationChoice))throw Error('Account cache could not be read. Your saved copy has not been overwritten.')
+  if(![1,2,3,4,5,6].includes(value.version)||!value.base?.cells||typeof value.base.cells!=='object'||Array.isArray(value.base.cells)||!Number.isSafeInteger(value.base.revision)||value.base.revision<0||!value.identities?.localToCloud||!Array.isArray(value.queue)||!Array.isArray(value.backups)||typeof value.initialized!=='boolean'||value.migrationChoice!==undefined&&!['account','imported'].includes(value.migrationChoice))throw Error('Account cache could not be read. Your saved copy has not been overwritten.')
   const uuid=(v:unknown)=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
   for(const map of [value.identities,value.migrationIdentities].filter(Boolean)){
     const pairs=Object.entries(map!.localToCloud)
@@ -22,7 +22,13 @@ export function parseCache(raw:string|null):SyncCache{
   }
   return migrateQueue(value)
 }
-const dependencies=(op:Operation)=>op.changes.filter(c=>!['assess','submit','draft','start','archive'].includes(op.kind)||c.key.startsWith('session-record/')||!op.changes.some(c=>c.key.startsWith('session-record/'))&&c.key.startsWith('session/')).map(c=>c.key)
+const dependencies=(op:Operation)=>{
+ const keys=op.changes.filter(c=>!['assess','submit','draft','start','archive'].includes(op.kind)||c.key.startsWith('session-record/')||!op.changes.some(c=>c.key.startsWith('session-record/'))&&c.key.startsWith('session/')).map(c=>c.key)
+ if(op.kind==='ai-complete')for(const c of op.changes){const e=c.after as {sourceQuizId?:string}|null;if(e?.sourceQuizId)keys.push('session-record/'+e.sourceQuizId,'session/daily')}
+ if(op.kind==='review-request')for(const c of op.changes){const r=c.after as {sourceSessionId?:string}|null;if(r?.sourceSessionId)keys.push('ai-evidence/'+r.sourceSessionId)}
+ if(op.kind==='assess')for(const c of op.changes)if(c.key.startsWith('review-request/'))keys.push(c.key)
+ return keys
+}
 export class SyncService{
   cache:SyncCache
   error=''
@@ -63,7 +69,7 @@ export class SyncService{
       }
       for(const [draftKey,text] of drafts)try{if(storage.getItem(draftKey)===null)storage.setItem(draftKey,text)}catch{this.storageError=true}
     }
-    if(raw&&JSON.parse(raw).version!==5){storage.setItem(key+':pre-v5',raw);this.persist(false)}
+    if(raw&&JSON.parse(raw).version!==6){storage.setItem(key+':pre-v6',raw);this.persist(false)}
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
   private emit(){for(const listener of this.listeners)listener()}
@@ -79,7 +85,7 @@ export class SyncService{
   enqueue(kind:OperationKind,before:Cells,after:Cells,options:Partial<Pick<Operation,'expectedRevision'|'migrationId'|'notBefore'|'undoLabel'>>={}){
     const changes=diffCells(before,after)
     if(!changes.length&&kind!=='migration')return undefined
-    const op:Operation={id:newId(),protocol:4,kind,at:Date.now(),changes,status:'pending',attempted:false,retryCount:0,...options}
+    const op:Operation={id:newId(),protocol:5,learningEpoch:Number(before['learning/epoch']??0),kind,at:Date.now(),changes,status:'pending',attempted:false,retryCount:0,...options}
     const coalesced=coalesceTail(this.cache.queue,op)
     if(!coalesced)this.cache.queue.push(op)
     const id=coalesced??op.id
@@ -135,7 +141,7 @@ export class SyncService{
         const dependency=dependencies(op).find(key=>blocked.has(key))
         if(dependency){op.blockedBy=blocked.get(dependency);dependencies(op).forEach(key=>blocked.set(key,op.id));continue}
         if(op.notBefore&&op.notBefore>Date.now()){dependencies(op).forEach(key=>blocked.set(key,op.id));continue}
-        op.wirePayload??=json({id:op.id,protocol:op.protocol,kind:op.kind,at:op.at,changes:op.changes,...(op.expectedRevision!==undefined?{expectedRevision:op.expectedRevision}:{}),...(op.migrationId?{migrationId:op.migrationId}:{})})
+        op.wirePayload??=json({id:op.id,protocol:op.protocol,...(op.learningEpoch!==undefined?{learningEpoch:op.learningEpoch}:{}),kind:op.kind,at:op.at,changes:op.changes,...(op.expectedRevision!==undefined?{expectedRevision:op.expectedRevision}:{}),...(op.migrationId?{migrationId:op.migrationId}:{})})
         op.attempted=true;op.status='processing';op.lastAttemptAt=Date.now();this.inFlightId=op.id;this.persist()
         if(!await this.whenDurable())throw Object.assign(Error('Offline changes could not be saved.'),{code:'STORAGE'})
         if(this.disposed||!this.authorized||this.offline){op.status='pending';this.persist();break}

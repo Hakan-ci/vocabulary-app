@@ -12,7 +12,7 @@ export class IndexedAccountStore implements AccountStore {
   const stored=await new Promise<string|undefined>((resolve,reject)=>{const tx=db.transaction('accounts','readonly'),request=tx.objectStore('accounts').get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})
   if(stored!==undefined){
     const cache=parseCache(stored)
-    if(JSON.parse(stored).version!==5)await new Promise<void>((resolve,reject)=>{const tx=db.transaction('accounts','readwrite');tx.objectStore('accounts').put(stored,key+':pre-v5');tx.objectStore('accounts').put(JSON.stringify(cache),key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error)})
+    if(JSON.parse(stored).version!==6)await new Promise<void>((resolve,reject)=>{const tx=db.transaction('accounts','readwrite');tx.objectStore('accounts').put(stored,key+':pre-v6');tx.objectStore('accounts').put(JSON.stringify(cache),key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error)})
     return cache
   }
   const cache=parseCache(legacy.getItem(key))

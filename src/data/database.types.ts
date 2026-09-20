@@ -389,6 +389,10 @@ export type Database = { public: { Tables: {
     Relationships: []
   }
 }; Views: Record<string,never>; Functions: {
+ kelime_snapshot_v5: { Args: Record<string,never>; Returns: Json }
+ kelime_apply_v5: { Args: { p_operation: Json }; Returns: Json }
+ kelime_reconcile_v5: { Args: { p_ids: string[] }; Returns: Json }
+ kelime_compact_drafts_v5: { Args: { p_operations: Json; p_batch: string }; Returns: Json }
  kelime_snapshot_v2: { Args: Record<string,never>; Returns: Json }
  kelime_apply_v2: { Args: { p_operation: Json }; Returns: Json }
  kelime_snapshot_v3: { Args: Record<string,never>; Returns: Json }

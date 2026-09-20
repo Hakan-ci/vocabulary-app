@@ -1,3 +1,4 @@
+import type {PracticePersistence} from './persistence'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { TestSession } from '../dailyTestModel'
 import type { LearningHistory } from '../learningHistory'
@@ -9,9 +10,10 @@ import type { PracticeMode } from './practiceModel'
 import type { AIPracticeProvider } from './provider'
 import { PracticeFeedback } from './PracticeFeedback'
 
-export type AIPracticeProps={quiz:TestSession;history:LearningHistory;catalog:readonly VocabularyWord[];onExit:()=>void;providerFactory?:()=>AIPracticeProvider}
+export type AIPracticeProps={persistence:PracticePersistence;quiz:TestSession;history:LearningHistory;catalog:readonly VocabularyWord[];onExit:()=>void;providerFactory?:()=>AIPracticeProvider}
 export function AIPractice(props:AIPracticeProps){
   const {quiz,catalog,onExit}=props
+  const [persistence]=useState(props.persistence)
   const [mode,setMode]=useState<PracticeMode>('conversation')
   const [service,setService]=useState<PracticeService|null>(null)
   const [error,setError]=useState('')
@@ -21,23 +23,23 @@ export function AIPractice(props:AIPracticeProps){
   useEffect(()=>{
     if(service&&((quiz.syncId??null)!==service.getSnapshot().sourceQuizId||service.getSnapshot().targets.some(t=>!catalog.some(w=>w.id===t.wordId)))){service.dispose();onExit()}
   },[quiz.syncId,catalog,onExit,service])
-  if(service)return <PracticeSessionView service={service} catalog={props.catalog} onExit={props.onExit}/>
+  if(service)return <PracticeSessionView persistence={persistence} service={service} catalog={props.catalog} onExit={props.onExit}/>
   return <section className="test-panel ai-practice" aria-label="AI practice setup">
     <div className="eyebrow">QUIZ COMPLETE · OPTIONAL PRACTICE</div><h2 ref={heading} tabIndex={-1}>Practice with AI</h2>
-    <p className="storage-notice">Mock practice — no AI service connected</p><p>Your quiz is complete. Practice here uses typed input and stays only in memory.</p>
+    <p className="storage-notice">Mock practice — no AI service connected</p><p>Your quiz is complete. Practice here uses typed input. Only compact completed outcomes are saved; conversation text stays in memory.</p>
     <label className="ai-mode">Practice mode<select value={mode} onChange={event=>setMode(event.target.value as PracticeMode)}>{Object.entries(practiceModeLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
     <p role="alert">{error}</p>
     <div className="test-actions"><button className="primary-button" onClick={()=>{try{const next=new PracticeService({...props,mode,provider:props.providerFactory?.()??new MockPracticeProvider()});setService(next);void next.start()}catch{setError('No available quiz words to practice. Return to your quiz results.')}}}>Start practice</button><button className="secondary-button" onClick={props.onExit}>Return to quiz results</button></div>
   </section>
 }
-function PracticeSessionView({service,catalog,onExit}:{service:PracticeService;catalog:readonly VocabularyWord[];onExit:()=>void}){
+function PracticeSessionView({service,onExit,persistence}:{persistence:PracticePersistence;service:PracticeService;catalog:readonly VocabularyWord[];onExit:()=>void}){
   const session=useSyncExternalStore(service.subscribe,service.getSnapshot)
   const [draft,setDraft]=useState('')
   const input=useRef<HTMLTextAreaElement>(null),heading=useRef<HTMLHeadingElement>(null)
   useEffect(()=>{heading.current?.focus()},[])
   useEffect(()=>{if(session.status==='ready')input.current?.focus()},[session.status])
   const progress=practiceProgress(session)
-  if(session.status==='feedback')return <PracticeFeedback session={session} service={service} catalog={catalog} onFinish={onExit}/>
+  if(session.status==='feedback')return <PracticeFeedback persistence={persistence} session={session} service={service} onFinish={onExit}/>
   const failed=session.status==='failed'||session.status==='cancelled'
   const ready=session.status==='ready',hasMore=progress.unpracticed.length>0
   return <section className="test-panel ai-practice" aria-label="AI practice session">

@@ -57,7 +57,7 @@ test('unsupported and empty speech requests remain non-blocking',()=>{
 })
 
 test('learning state defaults and migrates automatic pronunciation without affecting progress',()=>{
-  const fresh=emptyLearningState();assert.equal(fresh.autoPronunciation,true);assert.equal(fresh.version,6)
+  const fresh=emptyLearningState();assert.equal(fresh.autoPronunciation,true);assert.equal(fresh.version,7)
   const old={...fresh,version:5};delete old.autoPronunciation
   assert.equal(parseLearningState(old).autoPronunciation,true)
   const disabled=parseLearningState({...fresh,autoPronunciation:false});assert.equal(disabled.autoPronunciation,false)
@@ -65,9 +65,9 @@ test('learning state defaults and migrates automatic pronunciation without affec
   assert.equal(cells['setting/auto-pronunciation'],false);assert.equal(decodeData(cells,map).learning.autoPronunciation,false)
 })
 
-test('account caches migrate to protocol 4 and new preference operations use protocol 4',()=>{
-  const legacy={...emptyCache(),version:3};const migrated=parseCache(JSON.stringify(legacy));assert.equal(migrated.version,5)
+test('account caches migrate without losing pronunciation and new preferences use protocol 5',()=>{
+  const legacy={...emptyCache(),version:3};const migrated=parseCache(JSON.stringify(legacy));assert.equal(migrated.version,6)
   const storage=memoryStorage(),transport={pull:async()=>({revision:0,cells:{}}),push:async operation=>({conflict:false,snapshot:{revision:1,cells:Object.fromEntries(operation.changes.map(c=>[c.key,c.after]))}})}
   const sync=new SyncService(storage,'pronunciation',transport);sync.setOnline(false);sync.enqueue('preferences',{}, {'setting/auto-pronunciation':false})
-  assert.equal(sync.cache.queue[0].protocol,4);sync.dispose()
+  assert.equal(sync.cache.queue[0].protocol,5);sync.dispose()
 })

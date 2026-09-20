@@ -1,3 +1,4 @@
+import {parseEvidence,parseRequest} from '../aiPractice/learningEvidence.ts'
 import { emptyUserVocabulary, combinedCatalog } from '../userVocabulary.ts'
 import { emptyLearningState, parseLearningState } from '../learningState.ts'
 import { emptyWordHistory,parseWordHistory } from '../learningHistory.ts'
@@ -29,6 +30,9 @@ function mapSnapshot(value: unknown,map: IdentityMap,encode: boolean,key=''): un
 }
 export function encodeData(data: AppData,map: IdentityMap): Cells {
   const cells: Cells={}
+  if(data.learning.learningEpoch)cells['learning/epoch']=data.learning.learningEpoch
+  for(const [id,e] of Object.entries(data.learning.aiEvidence??{}))cells['ai-evidence/'+id]=json({...e,words:e.words.map(w=>({...w,wordId:reference(w.wordId,map)}))})
+  for(const [id,r] of Object.entries(data.learning.reviewRequests??{}))cells['review-request/'+id]=json({...r,wordId:reference(r.wordId,map)})
   for(const word of [...data.vocabulary.entries,...Object.values(data.vocabulary.overrides)])cells[`word/${reference(word.id,map)}`]=json({...word,id:reference(word.id,map)})
   for(const session of [data.learning.session,data.learning.reviewSession?.practice,...Object.values(data.learning.sessions??{}).filter(r=>r.archivedAt).map(r=>r.practice)])if(session)for(const q of session.questions)if(data.vocabulary.deletedIds.includes(q.wordId))cells[`archived-word/${reference(q.wordId,map)}`]=json({...q.snapshot.word,id:reference(q.wordId,map)})
   for(const id of data.vocabulary.deletedIds)cells[`deleted/${reference(id,map)}`]=true
@@ -63,6 +67,21 @@ export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppDat
   const start=cells['activity/start'] as {startedAt:number;startedDate:string}|undefined
   const sessions=Object.fromEntries(Object.entries(cells).filter(([key])=>key.startsWith('session-record/')).map(([key,v])=>[key.slice(15),mapSnapshot(v,map,false)]))
   const unavailable=[...vocabulary.deletedIds,...vocabulary.hiddenBuiltinIds]
-  const learning=parseLearningState({...initial,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,autoPronunciation:typeof cells['setting/auto-pronunciation']==='boolean'?cells['setting/auto-pronunciation']:true,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,unavailable)
+  // Malformed new records recover independently. Only vocabulary references cross
+  // the identity map; practice/request/assessment UUIDs are never vocabulary IDs.
+  const aiEvidence:Record<string,unknown>={},reviewRequests:Record<string,unknown>={}
+  for(const [key,raw] of Object.entries(cells))try{
+    if(key.startsWith('ai-evidence/')){
+      const value=raw as unknown as {words:{wordId:string}[]}
+      const decoded=parseEvidence({...value,words:value.words.map(w=>({...w,wordId:localId(w.wordId,map)}))})
+      if(decoded)aiEvidence[key.slice(12)]=decoded
+    }
+    if(key.startsWith('review-request/')){
+      const value=raw as unknown as {wordId:string}
+      const decoded=parseRequest({...value,wordId:localId(value.wordId,map)})
+      if(decoded)reviewRequests[key.slice(15)]=decoded
+    }
+  }catch{/* Preserve vocabulary, history and independently valid evidence. */}
+  const learning=parseLearningState({...initial,aiEvidence,reviewRequests,learningEpoch:cells['learning/epoch']??0,...(Object.keys(sessions).length?{sessions}:{}),history,preferredMode:cells['setting/mode']??initial.preferredMode,autoPronunciation:typeof cells['setting/auto-pronunciation']==='boolean'?cells['setting/auto-pronunciation']:true,dailyGoal:cells['setting/goal']??10,activity:{...initial.activity,...start,undated:cells['activity/undated']??initial.activity.undated,days},session:mapSnapshot(cells['session/daily']??null,map,false),reviewSession:mapSnapshot(cells['session/review']??null,map,false)},catalog,now,catalog,unavailable)
   return {vocabulary,learning,favorites:favorites.filter(id=>catalog.some(w=>w.id===id))}
 }

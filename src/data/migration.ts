@@ -1,3 +1,5 @@
+import {mergeRequest} from '../aiPractice/learningEvidence.ts'
+import type {DurableReviewRequest} from '../aiPractice/learningEvidence.ts'
 import { encodeData,reference } from './codec.ts'
 import type { AppData, Cells, IdentityMap, Json } from './models.ts'
 import { equal,json } from './models.ts'
@@ -6,7 +8,7 @@ import { englishKey, compatibleSpeech } from '../wordFields.ts'
 export type MigrationConflict = {key:string;label:string;device:Json;account:Json}
 export type MigrationPreview = {cells:Cells;conflicts:MigrationConflict[];additions:number;historicalAnswers:number}
 export type MigrationLinks = Record<number,string|'new'>
-export function meaningfulLocal(data:AppData) {return !!(Object.keys(data.learning.activity.days).length||bucketCounts(data.learning.activity.undated).answered||data.vocabulary.entries.length||Object.keys(data.vocabulary.overrides).length||data.vocabulary.deletedIds.length||data.favorites.length||Object.values(data.learning.history).some(h=>h.timesTested||h.learned)||data.learning.session||data.learning.reviewSession||data.learning.dailyGoal!==10||data.learning.preferredMode!=='englishToTurkish'||!data.learning.autoPronunciation)}
+export function meaningfulLocal(data:AppData) {return !!(Object.keys(data.learning.aiEvidence??{}).length||Object.keys(data.learning.reviewRequests??{}).length||Object.keys(data.learning.activity.days).length||bucketCounts(data.learning.activity.undated).answered||data.vocabulary.entries.length||Object.keys(data.vocabulary.overrides).length||data.vocabulary.deletedIds.length||data.favorites.length||Object.values(data.learning.history).some(h=>h.timesTested||h.learned)||data.learning.session||data.learning.reviewSession||data.learning.dailyGoal!==10||data.learning.preferredMode!=='englishToTurkish'||!data.learning.autoPronunciation)}
 export function duplicateCandidates(data:AppData,account:Cells) {
   return data.vocabulary.entries.map(word=>({word,candidates:Object.entries(account).filter(([key,v])=>key.startsWith('word/u:')&&v&&typeof v==='object'&&!Array.isArray(v)&&typeof v.english==='string'&&englishKey(v.english)===englishKey(word.english)&&compatibleSpeech(word,v as unknown as typeof word)).map(([key,v])=>({ref:key.slice(5),word:v as unknown as typeof word}))})).filter(item=>item.candidates.length)
 }
@@ -22,9 +24,12 @@ export function prepareMigration(data:AppData,account:Cells,map:IdentityMap,link
   // Unmapped device deletion markers must never delete unrelated account vocabulary.
   for(const id of data.vocabulary.deletedIds){const ref=reference(id,map);if(!account[`word/${ref}`]&&!account[`deleted/${ref}`]&&!local[`archived-word/${ref}`])delete local[`deleted/${ref}`]}
   for(const [key,device] of Object.entries(local)) {
+    if(key==='learning/epoch')continue
+    if(key.startsWith('ai-evidence/')||key.startsWith('review-request/')){(device as Record<string,Json>).epoch=account['learning/epoch']??0}
     const remote=account[key]
     if(remote===undefined){cells[key]=device;additions++;continue}
     if(equal(device,remote))continue
+    if(key.startsWith('review-request/')){cells[key]=json(mergeRequest(remote as unknown as DurableReviewRequest,device as unknown as DurableReviewRequest));continue}
     if(key==='activity/start'){const a=device as {startedAt:number},b=remote as {startedAt:number};cells[key]=a.startedAt<b.startedAt?device:remote;continue}
     const choice=choices[key]
     if(!choice)conflicts.push({key,label:migrationLabel(key,local,account),device:json(device),account:json(remote)})

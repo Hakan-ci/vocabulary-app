@@ -131,7 +131,7 @@ Each assessment saves history, session advancement, and activity in one write. D
 
 ## Storage and compatibility
 
-`kelime-favorites` remains unchanged. Version 6 of `kelime-learning-state` stores history, direction and pronunciation preferences, the version 4 Daily Test session, the independent version 2 Review session, daily goal, and compact activity aggregates together. Existing records migrate without replacing either session or activity totals. Original vocabulary is retained for legacy session migration. Each self-assessment saves history and question advancement in one write.
+`kelime-favorites` remains unchanged. Version 7 of `kelime-learning-state` stores history, direction and pronunciation preferences, the version 4 Daily Test session, the independent version 2 Review session, daily goal, compact activity aggregates, compact mock practice evidence, explicit review requests, and a reset epoch together. Existing records migrate without replacing either session or activity totals. Original vocabulary is retained for legacy session migration. Each self-assessment saves history and question advancement in one write.
 
 Older recorded history migrates into English → Turkish statistics, since that was the only original direction. Reverse statistics start at zero. Legacy Learned membership without recorded attempts remains intact and is immediately review-eligible in English → Turkish without inventing counts or dates. Old sessions retain their words, drafts, feedback, results, and newly learned IDs; their directions become English → Turkish. Old summaries show unavailable historical difficulty/review snapshots explicitly.
 
@@ -170,4 +170,4 @@ See [PWA_SETUP.md](PWA_SETUP.md) for installation, offline testing, icon regener
 
 ## Optional mock AI practice
 
-After a completed Daily Test, choose **Practice with AI** for typed Voice Answer simulation, Use the Word, or Conversation. All practice and suggested review requests stay in memory; no AI service or microphone is connected. Existing quiz scoring, learning history, and Review remain unchanged. See [AI practice architecture](AI_PRACTICE.md) for behavior, boundaries, tests, and future integration work.
+After a completed Daily Test, choose **Practice with AI** for typed Voice Answer simulation, Use the Word, or Conversation. Conversation text stays in memory; End Practice saves compact outcomes, and Add Selected to Review explicitly creates durable review requests. No AI service or microphone is connected. Quiz scoring, Known/Missed history and difficulty formulas remain unchanged. Apply database migration 006 before deploying this client. See [AI practice architecture](AI_PRACTICE.md) for behavior, boundaries, tests, and future integration work.

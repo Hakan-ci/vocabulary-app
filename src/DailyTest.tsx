@@ -1,3 +1,4 @@
+import type {ReviewRequests} from './aiPractice/learningEvidence'
 import type {LearningHistory} from './learningHistory'
 import { primaryMeaning } from './wordFields'
 import { useEffect, useRef } from 'react'
@@ -10,7 +11,7 @@ import { PracticeQuestion } from './PracticeQuestion'
 import { DirectionSetting } from './DirectionSetting'
 import { AutoPronunciationSetting } from './Pronunciation'
 
-type Props = {
+type Props = { requests?:ReviewRequests;
   history: LearningHistory
   now: number
   catalog: readonly VocabularyWord[]
@@ -27,7 +28,7 @@ type Props = {
   onPracticeAI: () => void
 }
 
-export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, draftScope, onSubmit, onAssess, onLearned, onPracticeAI }: Props) {
+export function DailyTest({ requests, history, now, catalog, mode, onModeChange, autoPronunciation, onAutoPronunciationChange, session, onStart, draftScope, onSubmit, onAssess, onLearned, onPracticeAI }: Props) {
   const summaryRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (session?.phase === 'completed') summaryRef.current?.focus()
@@ -84,5 +85,5 @@ export function DailyTest({ history, now, catalog, mode, onModeChange, autoPronu
     </section>
   }
 
-  return <PracticeQuestion history={history} now={now} catalog={catalog} session={session} label="Daily Test" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
+  return <PracticeQuestion requests={requests} history={history} now={now} catalog={catalog} session={session} label="Daily Test" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
 }

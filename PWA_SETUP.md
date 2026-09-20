@@ -35,7 +35,7 @@ Application repositories store guest data in the existing localStorage keys. Acc
 
 ## IndexedDB migration and account isolation
 
-`kelime-accounts` / `accounts` stores a version-2 cache per Supabase project and user. Each record includes the acknowledged server projection, identity map, pending operation UUIDs, session selections and conflict backups. Each action serializes this cache and its operation in a single read/write transaction. Network dispatch waits for the persistence attempt; failures keep optimistic state and an explicit refresh-loss warning.
+`kelime-accounts` / `accounts` stores a version-6 serialized cache (IndexedDB layout version 1) per Supabase project and user. Each record includes the acknowledged server projection, identity map, pending operation UUIDs, session selections and conflict backups. Each action serializes this cache and its operation in a single read/write transaction. Network dispatch waits for the persistence attempt; failures keep optimistic state and an explicit refresh-loss warning.
 
 On first use, an existing `kelime-account:<project>:<user>:v1` localStorage record is validated and copied transactionally. The committed IndexedDB record is the migration receipt. The original localStorage record remains untouched as recovery material and is never automatically reimported after a successful copy. Do not remove these backups during rollout. Failed migrations can be retried; malformed caches are not silently erased.
 
@@ -49,6 +49,8 @@ Apply migrations in order to a test project before shipping the client:
 2. `supabase/migrations/002_events.sql` adds the event ledger, session archive field and protocol-2 RPCs. It does not rewrite migration 001.
 3. Apply `003_vocabulary_deletion.sql` for vocabulary deletion and reset commands.
 4. Apply `004_pronunciation.sql` for the synchronized pronunciation preference and protocol-4 RPCs.
+5. Apply `005_sync_reliability.sql` for receipt reconciliation and draft compaction.
+6. Apply `006_ai_practice_review.sql` before the current client for protocol-5 compact evidence, explicit review requests and reset metadata. Existing queue payloads and pre-v6 backups are retained. See [AI_PRACTICE.md](AI_PRACTICE.md).
 5. Run the two-account/device verification below, then roll out the client.
 
 The first accepted v2 mutation upgrades that account. The legacy writer is locked out after upgrade; it cannot replace event-based progress. Keep queued legacy data until the updated client migrates it. Recoverable pending single assessments retain their operation identity; ambiguous changes become visible conflicts instead of guessed counter increments.

@@ -1,3 +1,4 @@
+import {invalidateRequests} from '../aiPractice/learningEvidence.ts'
 import { readUserVocabulary, combinedCatalog, legacyCatalog, USER_VOCABULARY_KEY, saveImportedWords, saveEditedWord } from '../userVocabulary.ts'
 import { loadLearningState, LEARNING_STATE_KEY } from '../learningState.ts'
 import { sanitizeIds } from '../dailyTestModel.ts'
@@ -45,7 +46,7 @@ export function recoverLocal(storage: StorageAccess) {
 export const vocabularyRepository = {
   import(data: AppData,rows: ImportRow[]) { const result=saveImportedWords(memoryStorage(data),rows);return {data:{...data,vocabulary:result.value,learning:{...data.learning,history:parseHistory(data.learning.history,false,combinedCatalog(result.value))}},added:result.added.length,updated:result.updated.length} },
   edit(data: AppData,id: number,entry: WordEntry,separate: boolean) { return {...data,vocabulary:saveEditedWord(memoryStorage(data),id,entry,separate)} },
-  delete(data: AppData,id: number) { const result=deletePersonalWord(memoryStorage(data),id,data.learning);return {...data,vocabulary:result.value,learning:removeDeletedHistory(data.learning,result.value.deletedIds),favorites:data.favorites.filter(value=>value!==id)} },
+  delete(data: AppData,id: number) { const result=deletePersonalWord(memoryStorage(data),id,data.learning);return {...data,vocabulary:result.value,learning:{...removeDeletedHistory(data.learning,result.value.deletedIds),reviewRequests:invalidateRequests(data.learning.reviewRequests,result.value.deletedIds)},favorites:data.favorites.filter(value=>value!==id)} },
   deleteMany(data:AppData,ids:readonly number[],now=Date.now()){return deleteVocabularyEntries(data,ids,now)},
   restoreBuiltIns(data:AppData,ids:readonly number[]){return restoreBuiltInEntries(data,ids)},
   clearPersonal(data:AppData,now=Date.now()){return clearUserVocabulary(data,now)},

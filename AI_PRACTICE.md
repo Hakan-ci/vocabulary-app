@@ -1,6 +1,6 @@
-# Mock AI practice
+# Mock AI practice and persistent learning evidence
 
-Daily Test completion offers **Practice with AI**, alongside the existing Start another test and View Learned actions. All three modes use typed input in this phase. The screen identifies the provider as a mock; no network service, microphone, transcription, key, billing, or backend is involved. Guests and accounts can both use the mock, including offline.
+Daily Test completion offers **Practice with AI**, alongside the existing Start another test and View Learned actions. All three modes use typed input in this phase. The screen identifies the provider as a mock; no AI service, microphone, transcription, provider key, or billing is involved. Account persistence uses the existing Supabase synchronization service. Guests and accounts can both use the mock, including offline.
 
 ## Architecture
 
@@ -12,8 +12,14 @@ flowchart TD
     Context --> Provider[AIPracticeProvider / deterministic mock]
     Provider --> Validator[Runtime feedback validation]
     Validator --> UI[Conversation and feedback UI]
-    UI --> Requests[Temporary ReviewRequest objects]
-    Requests -. Future persistence phase .-> Review[Existing learning and review system]
+    UI --> Complete[completeAIPractice: compact evidence]
+    UI --> Confirm[Add Selected to Review]
+    Confirm --> Requests[requestReview: explicit requests]
+    Complete --> Store[Existing guest recovery / account outbox]
+    Requests --> Store
+    Store --> Eligibility[Shared review eligibility]
+    Eligibility --> Review[Normal Review assessment]
+    Review --> Resolve[Resolve observed request IDs in assessment operation]
 ```
 
 New modules in `src/aiPractice/`:
@@ -27,9 +33,11 @@ New modules in `src/aiPractice/`:
 | `mockProvider.ts` | Scripted prompts, phrase recognition, bounded example corrections |
 | `feedbackValidator.ts` | Runtime trust boundary and locally derived recommendations |
 | `practiceService.ts` | Observable in-memory state, deterministic answer checks, cancellation, orchestration |
-| `reviewRequest.ts` | Pure, validated explicit review-request construction |
+| `reviewRequest.ts` | Original transient selection helper; no persistence access |
+| `learningEvidence.ts` | Compact whitelist, parsers, stable confirmation IDs and monotonic lifecycle |
+| `persistence.ts` | Application command interface and durability result |
 | `AIPractice.tsx` | Mode setup and typed practice UI |
-| `PracticeFeedback.tsx` | Outcomes, corrections, and temporary review selection |
+| `PracticeFeedback.tsx` | Automatic evidence checkpoint, explicit review confirmation, saving and retry states |
 
 `App.tsx` coordinates entry from `DailyTest.tsx`. No new state library is used. `PracticeService` follows the existing subscription/getSnapshot convention, and React uses `useSyncExternalStore`. Its constructor accepts a provider, clock, and ID generator. It has no repository, storage, authentication, or sync dependency.
 
@@ -69,11 +77,41 @@ Preparation transitions to ready. Submission transitions through processing back
 
 Practice is limited to eight targets, at most sixteen learner turns, and 2,000 characters per response. Only finalized turns enter service state; drafts remain React state. Progress derives from validated outcomes. Source changes, navigation, account-scope changes, target removal, and unmount dispose the active service. Existing pronunciation stops on entry. Reload does not resume mock practice; the completed quiz remains intact.
 
-**Everything introduced here is transient:** drafts, finalized turns, outcomes, feedback, corrections, and staged review requests. Nothing enters localStorage, IndexedDB, the account outbox, mastery counters, activity totals, or the Review queue.
+### Durable checkpoints and privacy
 
-`ReviewRequest` contains `wordId`, direction, request timestamp, `source: 'aiPractice'`, and source practice-session ID. `createReviewRequests` accepts only selected suggested targets still available in the current catalog. The service stages these idempotently in memory. The UI explicitly states that they are temporary and discarded on leaving practice. It does not pretend that they were added to Review.
+Learning state **7** adds `learningEpoch`, `aiEvidence` and `reviewRequests`. Versions 1–6 load with empty AI collections and epoch zero. Malformed new records are dropped independently; malformed word references cannot discard valid vocabulary, quiz or history records. Historical evidence does not recreate deleted vocabulary.
 
-Future persistence work must add an explicit learning command and durable review-request lifecycle, validate identity mapping, extend versioned local/account encoding and RPCs, address deletion/reset/import/concurrent-device behavior, and define when a normal review satisfies a request. It must not implement review requests with `recordAssessment(..., false)`. No schema or sync protocol is changed in this phase.
+`Application.completeAIPractice` revalidates finalized feedback, selects a compact whitelist and saves once per practice-session UUID. The persisted record contains the source quiz UUID (nullable for historical sessions), completion time, mode, evaluator `mock`, epoch, and at most eight word/direction outcomes with retrieval, semantics, grammar and a suggested flag. It excludes turns, typed practice answers, explanations, corrections, strengths, prompts and audio. Existing deterministic quiz answers retain their existing storage behavior. A grammar-only correction cannot suggest vocabulary review.
+
+**Add Selected to Review** calls `Application.requestReview` only after evidence is durable. Selected suggestions must occur in saved evidence and the current vocabulary. Each confirmation keeps a stable UUID, word, direction, timestamp, source, practice UUID, epoch and lifecycle (`active`, `resolved`, `cancelled`). UUIDs are deterministically derived with SHA-256 from the practice UUID and immutable target position, so confirmations agree across devices even when local numeric word IDs differ. Separate sessions retain separate provenance; one session/word/direction cannot create a second confirmation. Accepted suggestions are derived from linked requests, never written back into immutable evidence.
+
+Both commands capture the account/guest scope and reset epoch. State updates happen before asynchronous durability waits, so concurrent duplicate submissions reuse the same record and operation. Failed writes retain in-memory selections and operations; Retry persists those same identities. A refresh before a failed save succeeds can lose that unsaved work, and the UI says so. Leaving after success retains the compact records; practice conversations are still discarded.
+
+Guests use the existing recovery envelope and compatible localStorage keys. Accounts use the existing IndexedDB cache and outbox, atomically storing the projection and pending operation. A resolved command means **locally durable**, not necessarily uploaded: the UI distinguishes saved on this device, awaiting sync, and synchronized results. Account status continues to show later synchronization progress/errors. No partial turn, draft or streaming write exists. One completed practice creates one `ai-complete` operation; one explicit confirmation batch creates one `review-request` operation. Both are non-coalescing event barriers. Assessment resolution shares the ordinary `assess` operation.
+
+### Eligibility, ordering and resolution
+
+`reviewEligibility.ts` combines unchanged history scheduling with active requests. Review, navigation counts, current Needs Review badges, catalog filters and dashboard attention counts use this projection. Daily Test selection and all difficulty/mastery calculations remain unchanged. A request is immediately eligible; its timestamp is the effective deadline unless normal history supplies an earlier one.
+
+Multiple active requests collapse into one item per word/direction and each Review session contains a word once. Among eligible directions, unresolved misses win, then higher directional difficulty, earlier effective deadline, and English → Turkish. Queue order retains misses first, migrated eligibility next, other due words next and upcoming words last. Request-only entries appear in Needs Review with “Suggested by AI Practice.” An active session's questions never expand when another request arrives; its other eligible direction remains for a later session.
+
+At self-assessment, `assessReviewState` captures exactly the active request IDs visible for that word/direction in the finalized result. Both Known and Didn’t know resolve those IDs. A miss stays due through existing history rules. Daily Test, opening/starting Review, cancelling practice and AI feedback cannot resolve requests. The server validates the observed IDs against the successfully accepted Review assessment in the same transaction as history, activity and question advancement.
+
+Unseen requests survive regardless of timestamps or delivery order. Active creation replay cannot replace a terminal request. Concurrent accepted assessments choose the lexicographically smallest resolving event UUID as deterministic resolution metadata; the assessment event retains its original timestamp. Cancellation dominates resolution, which dominates active state. Concurrent confirmation timestamps merge to their minimum without changing immutable provenance. Optimistic replay uses the same lifecycle rules.
+
+### Deletion, reset and import
+
+Deleting/hiding vocabulary cancels requests immediately; ordinary restoration does not reactivate them. Short Undo restores the pre-deletion snapshot/unsent operation. Server cleanup includes requests absent from the deleting device's cache. Compact evidence stays as history. Reset-progress and clear-all remove evidence/requests and advance the epoch. AI commands from earlier epochs conflict and remain in the established recovery workflow rather than resurrecting learning state.
+
+Guest import keeps the existing preview, identity linking, revision checks, dataset receipts and conflict handling. Every evidence/request word reference is explicitly mapped to `b:<ID>` or `u:<UUID>`; practice, request and assessment UUIDs never enter vocabulary-ID conversion. Imported records adopt the destination epoch, retain stable record IDs and merge lifecycle monotonically. Imported resolved requests require linked Review result evidence. A dataset receipt prevents reimporting the same dataset after reset. Sign-out/account switching retain existing isolated caches.
+
+### Database and client rollout
+
+Apply **`supabase/migrations/006_ai_practice_review.sql` after 005 and before deploying this client**. No live database migration was performed. Source quiz references must identify a completed Daily Test owned by the account. Evidence operations depend on unresolved source-quiz operations, and application commands restrict writes to their exact checkpoint keys. The migration adds validated `ai-evidence/` and `review-request/` namespaces in existing `account_records`; it adds no vocabulary database or second queue. It reuses profile-row locks, operation receipts, ownership checks and RLS, validates bounded batches and compact enums, and makes evidence/request operations atomic. Untrusted clients still cannot prove linguistic correctness: SQL validation establishes structure/ownership and lifecycle consistency, not authentic model evaluation.
+
+Synchronization protocol is **5**; serialized account caches are **6**. IndexedDB remains database/store version 1 with the same `accounts` store. Cache upgrades retain `:pre-v6` backups and original attempted payloads. Protocol-5 snapshots expose the authoritative `profiles.reset_epoch` as validated `learning/epoch` metadata. Epoch zero and an absent legacy cell compare equivalently in diffs.
+
+The client uses `kelime_apply_v5`, `kelime_snapshot_v5`, `kelime_reconcile_v5` and `kelime_compact_drafts_v5`. After adoption, old mutation endpoints are blocked under the profile lock. The new endpoint accepts preserved legacy queue operations without rewriting their attempted payloads or attaching request resolution to old assessments. Migration-005 conflict classification, receipt reconciliation and draft-chain validation remain in force. Older endpoints keep their previous behavior on accounts not yet upgraded. `npm run db:types` regenerates the checked-in database types from executable migrations.
 
 ## Future voice and real AI
 
@@ -105,64 +143,87 @@ PLAYWRIGHT_CHANNEL=chromium npm run test:browser
 PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts
 ```
 
-`tests/aiPractice.test.mjs` covers selection/privacy, validation, matching, state transitions, semantic/grammar separation, deterministic mock behavior, late responses, cancellation/failures, review requests, and unchanged account storage/outbox.
+`tests/aiPractice.test.mjs` continues to verify the storage-free provider/service boundary, matching, validation and mock limitations. `tests/aiPersistence.test.mjs` covers compact whitelisting, independent recovery, identity mapping, command durability/retry, IndexedDB reload, scope isolation, eligibility, observed resolution, lifecycle replay, Undo and import. `tests/aiPersistenceSql.test.mjs` exercises migration 005→006, RLS, atomic validation failures, concurrent Review sessions, unseen requests, terminal replay, reset epochs, compatibility, receipts and import provenance.
 
-`tests/pwa/aiPractice.spec.ts` exercises the production post-quiz flow, all modes, zero storage writes, optional entry, cancellation/navigation, feedback, review staging, refresh, accessibility, and mobile layout. `playwright.ai.config.ts` runs the separate dev-only failure fixture in `tests/browser/aiPractice.html`; it is not included in the production build and supplies no production failure controls.
+`tests/pwa/aiPractice.spec.ts` exercises all three modes in the production build, asserts zero writes before End Practice and only recovery-envelope learning writes at the two durable checkpoints, checks unchanged mastery/quiz results, reloads requests into normal Review and resolves them by self-assessment. Keyboard focus, 320px layout and Axe checks remain. `playwright.ai.config.ts` uses a development-only fixture for provider failure and evidence/request storage failures with retries; no production failure controls exist.
 
-## Implementation completion report
+## Persistence-phase delivery report
 
-Implemented the complete mock-only cycle: completed Daily Test → optional mode selection → typed practice → validated structured feedback → temporary review-request selection. Existing completion actions remain available. Cancellation, failure, and refresh preserve the completed quiz. All new practice information stays in memory.
+Real AI, microphone capture, transcription, provider endpoints/secrets, billing and persisted conversation/resume remain out of scope. Mock judgments remain scripted and limited; only compact outcomes and explicit requests are retained.
 
 Created files:
 
 ```text
-AI_PRACTICE.md
-playwright.ai.config.ts
-src/aiPractice/AIPractice.tsx
-src/aiPractice/PracticeFeedback.tsx
-src/aiPractice/contextBuilder.ts
-src/aiPractice/feedbackValidator.ts
-src/aiPractice/mockProvider.ts
-src/aiPractice/practiceModel.ts
-src/aiPractice/practiceService.ts
-src/aiPractice/provider.ts
-src/aiPractice/reviewRequest.ts
-src/aiPractice/targetWordSelector.ts
-tests/ai-browser/failure.spec.ts
-tests/aiPractice.test.mjs
-tests/browser/aiPractice.html
-tests/browser/aiPractice.tsx
-tests/pwa/aiPractice.spec.ts
+src/aiPractice/learningEvidence.ts
+src/aiPractice/persistence.ts
+src/reviewEligibility.ts
+supabase/migrations/006_ai_practice_review.sql
+tests/aiPersistence.test.mjs
+tests/aiPersistenceSql.test.mjs
 ```
 
 Modified files:
 
 ```text
+AI_PRACTICE.md
+PWA_SETUP.md
 README.md
-playwright.config.ts
-src/App.css
+SUPABASE_SETUP.md
+scripts/generate-db-types.mjs
 src/App.tsx
 src/DailyTest.tsx
+src/PracticeQuestion.tsx
+src/Review.tsx
+src/WordDifficulty.tsx
+src/aiPractice/AIPractice.tsx
+src/aiPractice/PracticeFeedback.tsx
+src/catalogQuery.ts
+src/dailyTestModel.ts
+src/data/accountStore.ts
+src/data/application.ts
+src/data/cloudRepository.ts
+src/data/codec.ts
+src/data/database.types.ts
+src/data/eventProjection.ts
+src/data/localRepository.ts
+src/data/migration.ts
+src/data/models.ts
+src/data/queueMigration.ts
+src/data/syncService.ts
+src/learningState.ts
+src/progressModel.ts
+src/reviewModel.ts
+src/vocabularyManagement.ts
+tests/adaptiveLearning.test.mjs
+tests/ai-browser/failure.spec.ts
+tests/browser/aiPractice.tsx
+tests/dbHarness.mjs
+tests/offline.test.mjs
+tests/progress.test.mjs
+tests/pronunciation.test.mjs
+tests/pwa/aiPractice.spec.ts
 tests/pwa/app.spec.ts
+tests/review.test.mjs
+tests/syncReliability.test.mjs
 ```
 
-The existing browser config and persistent-browser test now accept `PLAYWRIGHT_CHANNEL`, retaining `msedge` as the default. This permits Chromium verification on this machine; no existing assertions were removed or weakened. CSS changes are scoped to the new practice UI, including contrast and mobile checkbox fixes found during verification. No dependency manifest, lockfile, database migration, sync code, or environment-secret file changed.
-
-Verification performed:
+Final verification (2026-09-20):
 
 | Command/check | Result |
 | --- | --- |
-| `npm ci --no-audit --no-fund` | Installed locked dependencies after network access was granted |
-| `npm test` with temporary Node 24 on PATH | All 18 test files passed, including existing PGlite database/security/sync tests |
-| Node 24 running `tests/aiPractice.test.mjs` directly | All 17 new domain tests passed; rerun after final validator changes |
-| `npm run lint` | Passed with no warnings |
+| `npm test` with Node 24 on PATH | All 20 test files passed, including PGlite migration/security/regression tests; no skips |
+| Persistence domain and SQL coverage | 15 domain tests and 9 SQL scenarios, including application-generated operations synchronized end to end |
+| `npm run lint` | Passed, no warnings |
 | `npm run build` | TypeScript and production/PWA build passed |
-| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser` | All 16 production browser tests passed |
-| `PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts` | Isolated provider-failure test passed |
-| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser -- tests/pwa/aiPractice.spec.ts` | All 5 targeted tests passed again after final checkbox/validator changes |
-| Axe, 320px overflow/checkbox assertions, keyboard submission/focus, mobile screenshot inspection | Passed for the new feedback flow |
+| `npm run db:types` with Node 24 | Regenerated successfully from all six migrations |
+| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser -- tests/pwa/aiPractice.spec.ts` | All 5 targeted production tests passed |
+| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser` | All 16 production browser tests passed on final run |
+| `PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts` | All 4 isolated failure/retry tests passed |
+| Accessibility/mobile | Axe, keyboard/focus, 320px overflow checks and feedback screenshot inspection passed |
 | `git diff --check` | Passed |
 
-The system Node 22 build lacked native TypeScript support; a temporary Node 24 runtime was used without changing project dependencies. Playwright's expected Chromium revision was installed. Initial sandbox port restrictions and missing-browser errors were resolved; no browser checks were skipped. Edge itself was not available, so browser results are for Chromium.
+The system Node 22 runtime was not used for native TypeScript unit tests; the available Node 24 binary was placed on PATH. Chromium was used through the existing channel override; Edge and physical mobile devices were not tested. Local browser-server execution required sandbox permission, which was granted. There are no unresolved verification blockers. Dependencies were already installed; package manifests and lockfiles are unchanged.
 
-Known limitations are intentional for this stage: mock language judgments are scripted and limited, no microphone or real AI exists, no practice resume/history is stored, and staged review requests disappear when practice ends. Persistent learning evidence/review requests, schema/sync migration, authenticated provider endpoints, quotas, voice capture, and official OpenAI integration remain future phases. Implementation stopped at this boundary.
+An initial production run exposed a test selector that still targeted desktop navigation after changing to mobile width; the test now exercises Mobile navigation. An existing pronunciation assertion now polls for its already-asynchronous scheduled callback instead of racing it. No assertions were removed or skipped.
+
+No live Supabase project was contacted or migrated, and the client was not deployed. Apply migration 006 before deployment. Work stops at compact persistence and explicit Review integration; real provider/voice work remains a separate phase.

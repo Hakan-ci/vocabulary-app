@@ -1,12 +1,15 @@
+import {directionEligible} from './reviewEligibility.ts'
+import {activeRequests} from './aiPractice/learningEvidence.ts'
+import type {ReviewRequests} from './aiPractice/learningEvidence.ts'
 import type { VocabularyWord } from './vocabulary.ts'
 import { directions } from './learningTypes.ts'
 import type { TestDirection } from './learningTypes.ts'
-import { calculateDifficulty, DAY_MS, directionalReviewDue, latestWasMissed, reviewIntervalDays } from './learningHistory.ts'
+import { calculateDifficulty, DAY_MS, latestWasMissed, reviewIntervalDays } from './learningHistory.ts'
 import type { LearningHistory, WordLearningHistory } from './learningHistory.ts'
 import { assessAnswer, parseSession, snapshotQuestion } from './dailyTestModel.ts'
 import type { TestSession } from './dailyTestModel.ts'
 
-export type ReviewDirection = { direction: TestDirection; deadline: number | null; missed: boolean; migrated: boolean; due: boolean; difficulty: number }
+export type ReviewDirection = { direction: TestDirection; deadline: number | null; missed: boolean; migrated: boolean; due: boolean; difficulty: number; requested:boolean }
 export type ReviewGroup = 'Needs Review' | 'Overdue' | 'Due today' | 'Next scheduled reviews'
 export type ReviewEntry = { word: VocabularyWord; directions: ReviewDirection[]; selected: ReviewDirection; group: ReviewGroup }
 export type ReviewSession = { version: 2; practice: TestSession }
@@ -17,16 +20,18 @@ export function reviewDeadline(h: WordLearningHistory, direction: TestDirection)
   if (direction === 'englishToTurkish' && h.legacyReviewPending && h.learned) return null
   return s.lastKnownAt === null ? null : s.lastKnownAt + reviewIntervalDays(s.consecutiveKnown) * DAY_MS
 }
-export function reviewQueue(catalog: readonly VocabularyWord[], history: LearningHistory, now: number): ReviewEntry[] {
+export function reviewQueue(catalog: readonly VocabularyWord[], history: LearningHistory, now: number, requests:ReviewRequests={}): ReviewEntry[] {
   const today = new Date(now); today.setHours(0, 0, 0, 0)
   const entries: ReviewEntry[] = []
   for (const word of catalog) {
     const h = history[word.id]
     const scheduled = directions.flatMap(direction => {
       const migrated = direction === 'englishToTurkish' && h.legacyReviewPending && h.learned
-      const deadline = reviewDeadline(h, direction)
+      const explicit=activeRequests(requests,word.id,direction)
+      const normal=reviewDeadline(h,direction)
+      const deadline=explicit.length?Math.min(normal??Infinity,...explicit.map(r=>r.requestedAt)):normal
       if (deadline === null && !migrated) return []
-      return [{ direction, deadline, migrated, missed: latestWasMissed(h[direction]), due: directionalReviewDue(h, direction, now), difficulty: calculateDifficulty(h[direction], now).score }]
+      return [{ direction, deadline, migrated, missed: latestWasMissed(h[direction]), requested:explicit.length>0, due: directionEligible(word.id,h,direction,now,requests), difficulty: calculateDifficulty(h[direction], now).score }]
     })
     if (!scheduled.length) continue
     const due = scheduled.filter(d => d.due)
@@ -34,7 +39,7 @@ export function reviewQueue(catalog: readonly VocabularyWord[], history: Learnin
     const selected = [...relevant].sort((a, b) => due.length
       ? Number(b.missed) - Number(a.missed) || b.difficulty - a.difficulty || (a.deadline ?? 0) - (b.deadline ?? 0) || directions.indexOf(a.direction) - directions.indexOf(b.direction)
       : (a.deadline ?? 0) - (b.deadline ?? 0) || directions.indexOf(a.direction) - directions.indexOf(b.direction))[0]
-    const group: ReviewGroup = !due.length ? 'Next scheduled reviews' : due.some(d => d.missed || d.migrated) ? 'Needs Review' : Math.min(...due.map(d => d.deadline!)) < today.getTime() ? 'Overdue' : 'Due today'
+    const group: ReviewGroup = !due.length ? 'Next scheduled reviews' : due.some(d => d.missed || d.migrated || d.requested) ? 'Needs Review' : Math.min(...due.map(d => d.deadline!)) < today.getTime() ? 'Overdue' : 'Due today'
     entries.push({ word, directions: relevant, selected, group })
   }
   return entries.sort((a, b) => {
@@ -42,8 +47,8 @@ export function reviewQueue(catalog: readonly VocabularyWord[], history: Learnin
     return priority(a) - priority(b) || (a.selected.deadline ?? 0) - (b.selected.deadline ?? 0) || b.selected.difficulty - a.selected.difficulty || a.word.id - b.word.id
   })
 }
-export function createReviewSession(catalog: readonly VocabularyWord[], history: LearningHistory, now: number, random = Math.random): ReviewSession | null {
-  const questions = reviewQueue(catalog, history, now).filter(entry => entry.selected.due).map(entry => ({ wordId: entry.word.id, direction: entry.selected.direction })).map(q => snapshotQuestion(q, catalog, random))
+export function createReviewSession(catalog: readonly VocabularyWord[], history: LearningHistory, now: number, random = Math.random, requests:ReviewRequests={}): ReviewSession | null {
+  const questions = reviewQueue(catalog, history, now,requests).filter(entry => entry.selected.due).map(entry => ({ wordId: entry.word.id, direction: entry.selected.direction })).map(q => snapshotQuestion(q, catalog, random))
   if (!questions.length) return null
   return { version: 2, practice: { version: 4, syncId: crypto.randomUUID(), startedAt: now, completedAt: null, mode: 'mixed', questions, reviewWordIds: questions.map(q => q.wordId), index: 0, phase: 'answering', draft: '', submittedAnswer: '', submittedCorrect: null, results: [], newlyLearnedIds: [], completion: null } }
 }

@@ -89,7 +89,7 @@ test('pronunciation works in vocabulary and editing without leaking reverse answ
  await expect(page.getByRole('button',{name:/Pronounce/})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(0)
  const answer=await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('kelime-learning-state')!).session;return s.questions[s.index].snapshot.acceptedAnswers[0]})
  await page.getByLabel('English meaning',{exact:true}).fill(answer);await page.getByLabel('English meaning',{exact:true}).press('Enter')
- await expect(page.getByRole('button',{name:/Pronounce correct answer/})).toBeVisible();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
+ await expect(page.getByRole('button',{name:/Pronounce correct answer/})).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
  await nav(page,/Vocabulary/);await nav(page,/Daily Test/);await page.getByRole('button',{name:'Continue your test'}).click();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(1)
  await nav(page,/Account/);await page.getByLabel('Automatic pronunciation').uncheck();expect((await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!).autoPronunciation))).toBe(false)
  await nav(page,/Vocabulary/);await page.getByRole('button',{name:'Pronounce Hello'}).click();expect(await page.evaluate(()=>(window as any).__spoken.length)).toBe(2)

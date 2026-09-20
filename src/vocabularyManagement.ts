@@ -1,3 +1,4 @@
+import {invalidateRequests} from './aiPractice/learningEvidence.ts'
 import { emptyActivity } from './activity.ts'
 import { emptyHistory, emptyWordHistory } from './learningHistory.ts'
 import type { LearningState } from './learningState.ts'
@@ -40,7 +41,7 @@ export function deleteVocabularyEntries(data:AppData,ids:readonly number[],now=D
   for(const id of plan.builtInIds)hiddenBuiltinState[id]={id,hiddenAt:now,history:learning.history[id]??emptyWordHistory(),favorite:data.favorites.includes(id)}
   const history=Object.fromEntries(Object.entries(learning.history).filter(([id])=>!targets.has(Number(id))))
   const vocabulary:UserVocabulary={...v,entries:v.entries.filter(word=>!targets.has(word.id)),legacyEntries:v.legacyEntries.filter(word=>!targets.has(word.id)),deletedIds:unique([...v.deletedIds,...plan.personalIds]),hiddenBuiltinIds:unique([...v.hiddenBuiltinIds,...plan.builtInIds]),hiddenBuiltinState}
-  return {plan,data:{vocabulary,learning:{...learning,history},favorites:data.favorites.filter(id=>!targets.has(id))}}
+  return {plan,data:{vocabulary,learning:{...learning,history,reviewRequests:invalidateRequests(learning.reviewRequests,plan.ids)},favorites:data.favorites.filter(id=>!targets.has(id))}}
 }
 export function hideBuiltInEntries(data:AppData,ids:readonly number[],now=Date.now()){return deleteVocabularyEntries(data,ids.filter(id=>id<FIRST_USER_ID),now)}
 export function restoreBuiltInEntries(data:AppData,ids:readonly number[]):AppData{
@@ -52,7 +53,7 @@ export function clearUserVocabulary(data:AppData,now=Date.now()):AppData{return 
 export function resetVocabularyProgress(data:AppData,now=Date.now()):AppData{
   const allPersonal=data.vocabulary.entries.map(word=>word.id),learning=archiveAffected(data.learning,new Set(combinedCatalog(data.vocabulary).map(word=>word.id)),now)
   const vocabulary:UserVocabulary={...data.vocabulary,entries:[],overrides:{},suppressedBuiltinIds:[],hiddenBuiltinIds:[],hiddenBuiltinState:{},legacyEntries:[],deletedIds:unique([...data.vocabulary.deletedIds,...allPersonal])}
-  return {vocabulary,favorites:[],learning:{...learning,history:emptyHistory(words),session:null,reviewSession:null,preferredMode:data.learning.preferredMode,dailyGoal:data.learning.dailyGoal,autoPronunciation:data.learning.autoPronunciation}}
+  return {vocabulary,favorites:[],learning:{...learning,aiEvidence:{},reviewRequests:{},learningEpoch:learning.learningEpoch+1,history:emptyHistory(words),session:null,reviewSession:null,preferredMode:data.learning.preferredMode,dailyGoal:data.learning.dailyGoal,autoPronunciation:data.learning.autoPronunciation}}
 }
 export function clearVocabularyData(data:AppData,now=Date.now()):AppData{
   const reset=resetVocabularyProgress(data,now)

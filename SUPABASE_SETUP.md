@@ -5,7 +5,7 @@ The app works without Supabase configuration. Guest data stays in its existing l
 ## Create a test project
 
 1. Create a project in the Supabase dashboard and retain the database password securely.
-2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`, `002_events.sql`, `003_vocabulary_deletion.sql`, and `004_pronunciation.sql` in numeric order. Apply each migration once; do not delete production tables to reapply it.
+2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`, `002_events.sql`, `003_vocabulary_deletion.sql`, `004_pronunciation.sql`, `005_sync_reliability.sql`, and `006_ai_practice_review.sql` in numeric order. Apply each migration once; do not delete production tables to reapply it.
 3. Enable the Email provider with email/password sign-in. Keep email confirmation enabled. Set Authentication → URL Configuration → Site URL to your app origin, for example `http://localhost:5173`. Add the exact development and production URLs to the Redirect URLs allowlist. Signup uses the current origin and pathname; confirmation redirects are handled by the Supabase client.
 4. Copy the project URL and a **public anon or publishable key** from the project connection/API settings. Never put a secret/service-role key or database password in Vite variables.
 5. Copy `.env.example` to `.env.local`, fill these values, and restart Vite:
@@ -93,3 +93,7 @@ Existing projects must apply `003_vocabulary_deletion.sql` after `001_kelime.sql
 ## Protocol 4 pronunciation preference
 
 Apply `004_pronunciation.sql` after migration 003. Protocol 4 adds the validated `setting/auto-pronunciation` account cell and v4 snapshot/apply RPCs. The preference uses the existing IndexedDB outbox, revision checks, receipts, and retry behavior. After an account accepts a protocol-4 write, protocol-3 and older writers are blocked so they cannot erase a setting they do not understand. No audio, voice data, or vocabulary pronunciation field is uploaded.
+
+## Persistent mock practice rollout (protocol 5)
+
+Apply `005_sync_reliability.sql`, then `006_ai_practice_review.sql` **before deploying the current client**. The client calls the v5 apply/snapshot/reconcile/compact-drafts RPCs. Evidence and explicit review requests use validated namespaces in `account_records`, the existing outbox, ownership/RLS and operation receipts. Snapshots include `profiles.reset_epoch`; stale AI writes are rejected after reset. Legacy attempted operations remain unchanged and use the v5 compatibility path. Older mutation endpoints are blocked once the account adopts protocol 5. No live deployment is included. See [AI practice architecture and verification](AI_PRACTICE.md) for privacy, request lifecycle, import and concurrency details.

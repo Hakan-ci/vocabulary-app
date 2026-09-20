@@ -1,4 +1,6 @@
-import {calculateDifficulty, directionalReviewDue, emptyWordHistory} from './learningHistory'
+import {directionEligible} from './reviewEligibility'
+import type {ReviewRequests} from './aiPractice/learningEvidence'
+import {calculateDifficulty, emptyWordHistory} from './learningHistory'
 import type {LearningHistory} from './learningHistory'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VocabularyWord } from './vocabulary'
@@ -8,8 +10,8 @@ import { modeLabels } from './learningTypes'
 import { PronunciationButton } from './Pronunciation'
 import { usePronunciationActions } from './pronunciationContext'
 
-type Props = { history:LearningHistory; now:number; catalog: readonly VocabularyWord[]; session: TestSession; label: 'Daily Test' | 'Review'; autoPronunciation:boolean; draftScope: string; onSubmit: (answer: string, identity: string) => boolean; onAssess: (known: boolean) => void }
-export function PracticeQuestion({ history, now, catalog, session, label, autoPronunciation, draftScope, onSubmit, onAssess }: Props) {
+type Props = { requests?:ReviewRequests; history:LearningHistory; now:number; catalog: readonly VocabularyWord[]; session: TestSession; label: 'Daily Test' | 'Review'; autoPronunciation:boolean; draftScope: string; onSubmit: (answer: string, identity: string) => boolean; onAssess: (known: boolean) => void }
+export function PracticeQuestion({ requests={}, history, now, catalog, session, label, autoPronunciation, draftScope, onSubmit, onAssess }: Props) {
   const feedbackRef = useRef<HTMLDivElement>(null)
   const { autoSpeakOnce, stop } = usePronunciationActions()
   useEffect(() => {
@@ -37,7 +39,7 @@ export function PracticeQuestion({ history, now, catalog, session, label, autoPr
     <div className="test-progress"><span>{label === 'Review' ? 'SPACED REVIEW' : 'DAILY PRACTICE'}</span><span aria-label="Question progress">{session.index + 1} / {session.questions.length}</span></div>
     <progress value={session.index} max={session.questions.length} aria-label="Completed questions" />
     <p className="test-mode-label">{modeLabels[question.direction]}</p>
-    <div className="practice-badges"><span>{difficulty.level}</span>{directionalReviewDue(h,question.direction,now)&&<span>Needs Review</span>}</div>
+    <div className="practice-badges"><span>{difficulty.level}</span>{directionEligible(question.wordId,h,question.direction,now,requests)&&<span>Needs Review</span>}</div>
     <p className="test-prompt">What is the {content.answerLang === 'tr' ? 'Turkish' : 'English'} meaning of this word?</p>
     <div className="practice-word-row"><h2 className="test-word" lang={content.sourceLang}>{content.prompt}</h2>{question.direction === 'englishToTurkish' && <PronunciationButton text={englishText} speechKey={`${source}:${sessionKey}:${session.index}:manual`} label={`Pronounce ${englishText}`} />}</div>
     {content.word.partOfSpeech && <span className="test-word-type">{content.word.partOfSpeech}</span>}

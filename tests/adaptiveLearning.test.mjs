@@ -98,7 +98,7 @@ test('version 1 aggregate history migrates into EN→TR only, preserving counter
   const old=toLegacyHistory(h)
   const mock=mockStorage({[LEARNING_STATE_KEY]:JSON.stringify({version:1,history:old,session:null}),'kelime-favorites':'[2]','kelime-learned':'[1]'})
   const loaded=loadLearningState(mock)
-  assert.equal(loaded.error,false);assert.equal(loaded.value.version,6)
+  assert.equal(loaded.error,false);assert.equal(loaded.value.version,7)
   assert.equal(loaded.value.preferredMode,'englishToTurkish')
   assert.equal(loaded.value.history[0].englishToTurkish.timesKnown,3)
   assert.equal(loaded.value.history[0].turkishToEnglish.timesTested,0)

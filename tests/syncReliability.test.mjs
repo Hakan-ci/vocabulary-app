@@ -56,7 +56,7 @@ test('118-entry legacy migration preserves events and malformed originals and is
  for(let i=0;i<4;i++)cache.queue.push(operation('favorite',`favorite/b:${i}`))
  assert.equal(cache.queue.length,118)
  const migrated=parseCache(JSON.stringify(cache));assert.equal(migrated.queue.length,114);assert.equal(migrated.quarantine.length,2);assert.equal(migrated.queue.filter(op=>op.kind==='assess').length,55);assert.ok(migrated.queue.every(op=>op.attempted));assert.deepEqual(parseCache(JSON.stringify(migrated)),migrated)
- const storage=memoryStorage();storage.setItem('legacy',JSON.stringify(cache));const sync=new SyncService(storage,'legacy',server());assert.equal(storage.getItem('legacy:pre-v5'),JSON.stringify(cache));sync.dispose()
+ const storage=memoryStorage();storage.setItem('legacy',JSON.stringify(cache));const sync=new SyncService(storage,'legacy',server());assert.equal(storage.getItem('legacy:pre-v6'),JSON.stringify(cache));sync.dispose()
 })
 test('interrupted processing recovers its stable payload and accepted receipts leave the queue',async()=>{
  const cache=emptyCache(),op={...operation(),status:'processing',attempted:true};op.wirePayload={id:op.id,kind:op.kind,at:op.at,changes:op.changes};cache.queue=[op]

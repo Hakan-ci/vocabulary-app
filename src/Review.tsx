@@ -1,3 +1,4 @@
+import type {ReviewRequests} from './aiPractice/learningEvidence'
 import type {LearningHistory} from './learningHistory'
 import { WordTags } from './WordTags'
 import { primaryMeaning } from './wordFields'
@@ -9,9 +10,9 @@ import { modeLabels } from './learningTypes'
 import { PracticeQuestion } from './PracticeQuestion'
 import { AutoPronunciationSetting, PronunciationButton } from './Pronunciation'
 
-type Props = { history: LearningHistory; now:number; catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; autoPronunciation:boolean; onAutoPronunciationChange:(value:boolean)=>void; onStart: () => void; draftScope: string; onSubmit: (answer: string, identity: string) => boolean; onAssess: (known: boolean) => void }
+type Props = { requests?:ReviewRequests; history: LearningHistory; now:number; catalog: readonly VocabularyWord[]; queue: ReviewEntry[]; session: ReviewSession | null; autoPronunciation:boolean; onAutoPronunciationChange:(value:boolean)=>void; onStart: () => void; draftScope: string; onSubmit: (answer: string, identity: string) => boolean; onAssess: (known: boolean) => void }
 const groups: ReviewGroup[] = ['Needs Review', 'Overdue', 'Due today', 'Next scheduled reviews']
-export function Review({ history, now, catalog, queue, session, autoPronunciation, onAutoPronunciationChange, onStart, draftScope, onSubmit, onAssess }: Props) {
+export function Review({ requests, history, now, catalog, queue, session, autoPronunciation, onAutoPronunciationChange, onStart, draftScope, onSubmit, onAssess }: Props) {
   const [showPractice, setShowPractice] = useState(true)
   const summaryRef = useRef<HTMLHeadingElement>(null)
   const practice = session?.practice
@@ -20,7 +21,7 @@ export function Review({ history, now, catalog, queue, session, autoPronunciatio
   useEffect(() => { if (practice?.phase === 'completed') summaryRef.current?.focus() }, [practice?.phase])
   if (active && showPractice) return <div className="review-page">
     <button className="secondary-button review-back" onClick={() => setShowPractice(false)}>Back to queue</button>
-    <PracticeQuestion history={history} now={now} catalog={catalog} session={practice} label="Review" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
+    <PracticeQuestion requests={requests} history={history} now={now} catalog={catalog} session={practice} label="Review" autoPronunciation={autoPronunciation} draftScope={draftScope} onSubmit={onSubmit} onAssess={onAssess} />
   </div>
   const summary = practice?.phase === 'completed' ? sessionSummary(practice, catalog) : null
   const pairs = (ids: number[]) => <ul className="learned-summary">{ids.map(id => {
@@ -59,7 +60,7 @@ export function Review({ history, now, catalog, queue, session, autoPronunciatio
         {entries.length ? <div className="word-grid">{entries.map(entry => <article className="word-card review-card" key={entry.word.id}>
           <div className="card-top"><WordTags tags={entry.word.tags} /></div>
           <div className="word-title-row"><h3 lang="en">{entry.word.english}</h3><PronunciationButton text={entry.word.english} speechKey={`review-queue:${entry.word.id}`} /></div><p className="word-translation" lang="tr">{primaryMeaning(entry.word)}</p>
-          <ul className="review-schedules">{entry.directions.map(item => <li key={item.direction}><strong>{modeLabels[item.direction]}</strong><span>{item.migrated ? 'Ready for review' : item.missed ? 'Missed · Ready now' : 'Scheduled review'}</span>{item.deadline !== null && <time dateTime={new Date(item.deadline).toISOString()}>{new Date(item.deadline).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time>}</li>)}</ul>
+          <ul className="review-schedules">{entry.directions.map(item => <li key={item.direction}><strong>{modeLabels[item.direction]}</strong><span>{item.requested ? 'Suggested by AI Practice' : item.migrated ? 'Ready for review' : item.missed ? 'Missed · Ready now' : 'Scheduled review'}</span>{item.deadline !== null && <time dateTime={new Date(item.deadline).toISOString()}>{new Date(item.deadline).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time>}</li>)}</ul>
         </article>)}</div> : <p className="test-hint">{group === 'Next scheduled reviews' ? 'No upcoming reviews scheduled yet.' : 'No words in this group.'}</p>}
       </section>
     })}

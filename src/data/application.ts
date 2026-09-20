@@ -1,3 +1,6 @@
+import {compactEvidence,confirmReviewRequests,reviewRequestIdentity} from '../aiPractice/learningEvidence.ts'
+import type {PracticePersistence} from '../aiPractice/persistence.ts'
+import type {PracticeSession} from '../aiPractice/practiceModel.ts'
 import { accountStore } from './accountStore.ts'
 import type { AccountStore } from './accountStore.ts'
 import { acquireAccountLock } from './accountLock.ts'
@@ -170,7 +173,7 @@ export class Application {
     this.sync.enqueue('migration',this.sync.cache.base.cells,preview.cells,{expectedRevision:this.sync.cache.base.revision,migrationId:dataset})
     this.scope=this.user.id;this.migrationOpen=false;this.previewOpen=false;this.remember();this.refresh()
   }
-  private commit(next:AppData,kind:OperationKind,options:Parameters<SyncService['enqueue']>[3]={}) {
+  private commit(next:AppData,kind:OperationKind,options:Parameters<SyncService['enqueue']>[3]={},recordKeys?:readonly string[]) {
     this.identifySessions(next)
     if(this.scope==='guest'){const previous=this.data;this.guest=next;this.data=next;try{saveLocal(this.storage,next,previous);this.storageError=false}catch{this.storageError=true}this.emit();return undefined}
     const sync=this.sync!
@@ -184,6 +187,9 @@ export class Application {
       }
     }
     if(['bulk-delete','clear-user','reset-progress','clear-all'].includes(kind))sync.cache.selections={daily:next.learning.session?.syncId,review:next.learning.reviewSession?.practice.syncId}
+    // Compact AI commands may write only their explicit checkpoint records, even
+    // when a legacy account snapshot lacks current defaults or session archives.
+    if(recordKeys)for(const key of new Set([...Object.keys(before),...Object.keys(after)]))if(!recordKeys.includes(key)){if(key in before)after[key]=before[key];else delete after[key]}
     // Tombstones and reads used for deletion are checked in the server transaction too.
     const id=sync.enqueue(kind,before,after,options);this.data=next;this.emit();return id
   }
@@ -200,6 +206,45 @@ export class Application {
     next={...next,sessions}
     if(this.sync&&this.scope!=='guest'){this.sync.cache.selections={daily:next.session?.syncId,review:next.reviewSession?.practice.syncId}}
     this.commit({...this.data,learning:next},action)
+  }
+  aiPracticeCommands():PracticePersistence {
+    const scope=this.scope,epoch=this.current.learning.learningEpoch
+    return {complete:session=>this.completeAIPractice(session,scope,epoch),request:(id,selected)=>this.requestReview(id,selected,scope,epoch)}
+  }
+  private checkPracticeScope(scope:string,epoch:number){if(this.scope!==scope||this.current.learning.learningEpoch!==epoch)throw Error('Learning data changed. Return to your quiz results.')}
+  private async practiceDurable(scope:string,epoch:number){
+    this.checkPracticeScope(scope,epoch)
+    if(this.scope==='guest'){
+      if(this.storageError){try{saveLocal(this.storage,this.data);this.storageError=false}catch{throw Error('Could not save on this device. Retry after freeing storage.')}}
+    }else{
+      const sync=this.sync!
+      if(sync.storageError)sync.persist(false)
+      if(!await sync.whenDurable())throw Error('Could not save on this device. Your selection is retained; retry.')
+    }
+    this.checkPracticeScope(scope,epoch)
+    return {pendingSync:this.scope!=='guest'&&!!this.sync?.cache.queue.length,synchronized:this.scope!=='guest'&&this.sync?.cache.queue.length===0}
+  }
+  async completeAIPractice(session:PracticeSession,scope=this.scope,epoch=this.current.learning.learningEpoch){
+    this.checkPracticeScope(scope,epoch)
+    const state=this.current.learning,existing=state.aiEvidence[session.id]
+    const evidence=compactEvidence(session,epoch,existing?.completedAt??Date.now())
+    const catalog=combinedCatalog(this.current.vocabulary)
+    if(evidence.words.some(w=>!catalog.some(word=>word.id===w.wordId)))throw Error('Practice vocabulary is no longer available.')
+    if(existing&&!equal(existing,evidence))throw Error('Practice evidence already exists with different outcomes.')
+    if(!existing)this.commit({...this.current,learning:{...state,aiEvidence:{...state.aiEvidence,[evidence.id]:evidence}}},'ai-complete',{},['ai-evidence/'+evidence.id])
+    return this.practiceDurable(scope,epoch)
+  }
+  async requestReview(sessionId:string,selected:readonly number[],scope=this.scope,epoch=this.current.learning.learningEpoch){
+    this.checkPracticeScope(scope,epoch)
+    await this.practiceDurable(scope,epoch)
+    const evidence=this.current.learning.aiEvidence[sessionId]
+    if(!evidence||evidence.epoch!==epoch)throw Error('Save completed practice evidence first.')
+    const identities=new Map(await Promise.all(evidence.words.map(async(w,index)=>[w.wordId,await reviewRequestIdentity(evidence.id,index)] as const)))
+    this.checkPracticeScope(scope,epoch)
+    const state=this.current.learning
+    const reviewRequests=confirmReviewRequests(evidence,selected,state.reviewRequests,combinedCatalog(this.current.vocabulary),Date.now(),wordId=>identities.get(wordId)!)
+    if(!equal(reviewRequests,state.reviewRequests))this.commit({...this.current,learning:{...state,reviewRequests}},'review-request',{},Object.keys(reviewRequests).filter(id=>!state.reviewRequests[id]).map(id=>'review-request/'+id))
+    return this.practiceDurable(scope,epoch)
   }
   saveFavorites(favorites:number[]){this.commit({...this.data,favorites},'favorite')}
   importWords(rows:ImportRow[]){const result=vocabularyRepository.import(this.data,rows);if(result.added||result.updated)this.commit(result.data,'vocabulary');return result}

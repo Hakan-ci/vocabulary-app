@@ -1,6 +1,8 @@
+import {reviewEligible} from './reviewEligibility.ts'
+import type {ReviewRequests} from './aiPractice/learningEvidence.ts'
 import type { VocabularyWord } from './vocabulary.ts'
 import { normalize } from './vocabulary.ts'
-import { calculateDifficulty, emptyWordHistory, isReviewDue } from './learningHistory.ts'
+import { calculateDifficulty, emptyWordHistory } from './learningHistory.ts'
 import type { LearningHistory } from './learningHistory.ts'
 import type { DifficultyLevel } from './learningTypes.ts'
 import { englishKey, normalizeTags, suggestedTags, tagKey } from './wordFields.ts'
@@ -10,21 +12,21 @@ export type CatalogFilters = { status: 'All' | 'New' | 'Learning' | 'Learned' | 
 export const emptyFilters = (): CatalogFilters => ({ status: 'All', difficulty: 'All', favoritesOnly: false, speech: '', tags: [], untagged: false })
 export const sortOptions: [CatalogSort, string][] = [['default','Default order'],['az','Alphabetical A–Z'],['za','Alphabetical Z–A'],['hardest','Difficulty high → low'],['easiest','Difficulty low → high'],['recent','Recently added'],['missed','Most missed'],['reviewed','Least recently reviewed']]
 export const catalogTags = (catalog: readonly VocabularyWord[]) => normalizeTags([...suggestedTags, ...catalog.flatMap(w => w.tags)]).sort((a,b) => a.localeCompare(b))
-export function vocabularyCounts(catalog: readonly VocabularyWord[], history: LearningHistory, now: number) {
+export function vocabularyCounts(catalog: readonly VocabularyWord[], history: LearningHistory, now: number, requests:ReviewRequests={}) {
   const counts = { Total: catalog.length, Learned: 0, Learning: 0, New: 0, 'Needs Review': 0 }
   for (const w of catalog) {
     const h = history[w.id] ?? emptyWordHistory()
     counts[h.learned ? 'Learned' : h.timesTested ? 'Learning' : 'New']++
-    if (isReviewDue(h,now)) counts['Needs Review']++
+    if (reviewEligible(w.id,h,now,requests)) counts['Needs Review']++
   }
   return counts
 }
-export function queryCatalog(catalog: readonly VocabularyWord[], history: LearningHistory, favorites: readonly number[], filters: CatalogFilters, search: string, sort: CatalogSort, now: number, collection: 'all' | 'favorites' | 'learned' = 'all'): VocabularyWord[] {
+export function queryCatalog(catalog: readonly VocabularyWord[], history: LearningHistory, favorites: readonly number[], filters: CatalogFilters, search: string, sort: CatalogSort, now: number, collection: 'all' | 'favorites' | 'learned' = 'all', requests:ReviewRequests={}): VocabularyWord[] {
   const needle = normalize(search.trim())
   const list = catalog.filter(w => {
     const h = history[w.id] ?? emptyWordHistory(), favored = favorites.includes(w.id)
     if (collection === 'favorites' && !favored || collection === 'learned' && !h.learned || filters.favoritesOnly && !favored) return false
-    if (filters.status === 'New' && (h.learned || h.timesTested) || filters.status === 'Learning' && (!h.timesTested || h.learned) || filters.status === 'Learned' && !h.learned || filters.status === 'Needs Review' && !isReviewDue(h,now)) return false
+    if (filters.status === 'New' && (h.learned || h.timesTested) || filters.status === 'Learning' && (!h.timesTested || h.learned) || filters.status === 'Learned' && !h.learned || filters.status === 'Needs Review' && !reviewEligible(w.id,h,now,requests)) return false
     if (filters.difficulty !== 'All' && calculateDifficulty(h,now).level !== filters.difficulty) return false
     if (filters.speech === '__unspecified' ? !!w.partOfSpeech : filters.speech && englishKey(w.partOfSpeech ?? '') !== englishKey(filters.speech)) return false
     if ((filters.tags.length || filters.untagged) && !(filters.untagged && !w.tags.length) && !w.tags.some(t => filters.tags.some(selected => tagKey(t) === tagKey(selected)))) return false

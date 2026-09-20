@@ -1,3 +1,5 @@
+import {reviewEligible} from './reviewEligibility.ts'
+import type {ReviewRequests} from './aiPractice/learningEvidence.ts'
 import type { VocabularyWord } from './vocabulary.ts'
 import type { LearningHistory } from './learningHistory.ts'
 import { calculateDifficulty, calculatedWord, learningStatus } from './learningHistory.ts'
@@ -13,12 +15,12 @@ export function studyStreak(activity: Activity, today: string) {
   const last = days.at(-1) ?? null
   return { current: last === today || last === shiftDate(today, -1) ? run : 0, best, last }
 }
-export function dashboard(catalog: readonly VocabularyWord[], history: LearningHistory, favorites: number[], activity: Activity, now: number) {
+export function dashboard(catalog: readonly VocabularyWord[], history: LearningHistory, favorites: number[], activity: Activity, now: number, requests:ReviewRequests={}) {
   const today = localDate(now)
   const rows = catalog.map(word => {
     const h = history[word.id], calculated = calculatedWord(h, now)
     const deadlines = directions.map(direction => reviewDeadline(h, direction)).filter((d): d is number => d !== null && Number.isFinite(new Date(d).getTime()))
-    return { word, history: h, ...calculated, status: learningStatus(h, now), overdue: deadlines.some(d => localDate(d) < today), scheduledToday: deadlines.some(d => localDate(d) === today) }
+    return { word, history: h, ...calculated, needsReview:reviewEligible(word.id,h,now,requests), status: reviewEligible(word.id,h,now,requests)?'Needs Review':learningStatus(h, now), overdue: deadlines.some(d => localDate(d) < today), scheduledToday: deadlines.some(d => localDate(d) === today) }
   })
   const buckets = [activity.undated, ...Object.values(activity.days)]
   const totalSource = (source: Source) => buckets.reduce((sum, b) => addCounts(sum, sourceCounts(b[source])), emptyCounts())

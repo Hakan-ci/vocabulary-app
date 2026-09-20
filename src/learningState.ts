@@ -1,3 +1,5 @@
+import {parseEvidenceState,activeRequests,resolveRequests} from './aiPractice/learningEvidence.ts'
+import type {PracticeEvidence,ReviewRequests} from './aiPractice/learningEvidence.ts'
 import { emptyActivity, migrateActivity, parseActivity, trackAssessment, goals } from './activity.ts'
 import type { Activity } from './activity.ts'
 import { parseReviewSession, assessReview } from './reviewModel.ts'
@@ -12,12 +14,12 @@ import { isTestMode } from './learningTypes.ts'
 import type { TestMode } from './learningTypes.ts'
 
 export type StoredPractice = {source:'daily'|'review';practice:TestSession;archivedAt?:number}
-export type LearningState = { version: 6; sessions?:Record<string,StoredPractice>; preferredMode: TestMode; autoPronunciation: boolean; history: LearningHistory; session: TestSession | null; reviewSession: ReviewSession | null; dailyGoal: number; activity: Activity }
+export type LearningState = { version: 7; learningEpoch:number; aiEvidence:Record<string,PracticeEvidence>; reviewRequests:ReviewRequests; sessions?:Record<string,StoredPractice>; preferredMode: TestMode; autoPronunciation: boolean; history: LearningHistory; session: TestSession | null; reviewSession: ReviewSession | null; dailyGoal: number; activity: Activity }
 export const LEARNING_STATE_KEY = 'kelime-learning-state'
-export const emptyLearningState = (catalog: readonly VocabularyWord[] = words, now = Date.now()): LearningState => ({ version: 6, preferredMode: 'englishToTurkish', autoPronunciation: true, history: emptyHistory(catalog), session: null, reviewSession: null, dailyGoal: 10, activity: emptyActivity(now) })
+export const emptyLearningState = (catalog: readonly VocabularyWord[] = words, now = Date.now()): LearningState => ({ version: 7, learningEpoch:0,aiEvidence:{},reviewRequests:{}, preferredMode: 'englishToTurkish', autoPronunciation: true, history: emptyHistory(catalog), session: null, reviewSession: null, dailyGoal: 10, activity: emptyActivity(now) })
 
 export function parseLearningState(value: unknown, catalog: readonly VocabularyWord[] = words, now = Date.now(), legacyCatalog: readonly VocabularyWord[] = catalog, deletedIds: readonly number[] = []): LearningState {
-  if (!value || typeof value !== 'object' || ![1, 2, 3, 4, 5, 6].includes(Number((value as LearningState).version))) return emptyLearningState(catalog, now)
+  if (!value || typeof value !== 'object' || ![1, 2, 3, 4, 5, 6, 7].includes(Number((value as LearningState).version))) return emptyLearningState(catalog, now)
   const state = value as LearningState
   const session = parseSession(state.session, catalog, false, legacyCatalog, deletedIds)
   const reviewSession = Number(state.version) >= 3 ? parseReviewSession(state.reviewSession, catalog, legacyCatalog, deletedIds) : null
@@ -29,7 +31,8 @@ export function parseLearningState(value: unknown, catalog: readonly VocabularyW
     const practice=parseSession(record.practice,[...catalog,...deleted],record.source==='review',legacyCatalog,deletedIds)
     if(practice)sessions[id]={source:record.source,practice,...(archived?{archivedAt:record.archivedAt}:{})}
   }
-  return { version: 6, ...(state.sessions?{sessions}:{}), preferredMode: isTestMode(state.preferredMode) ? state.preferredMode : 'englishToTurkish', autoPronunciation: typeof state.autoPronunciation === 'boolean' ? state.autoPronunciation : true, history: parseHistory(state.history, Number(state.version) === 1, catalog), session, reviewSession,
+  const learningEpoch=Number(state.version)>=7&&Number.isSafeInteger(state.learningEpoch)&&state.learningEpoch>=0?state.learningEpoch:0
+  return { version: 7, learningEpoch,...parseEvidenceState(Number(state.version)>=7?state.aiEvidence:{},Number(state.version)>=7?state.reviewRequests:{},learningEpoch,catalog.map(w=>w.id)), ...(state.sessions?{sessions}:{}), preferredMode: isTestMode(state.preferredMode) ? state.preferredMode : 'englishToTurkish', autoPronunciation: typeof state.autoPronunciation === 'boolean' ? state.autoPronunciation : true, history: parseHistory(state.history, Number(state.version) === 1, catalog), session, reviewSession,
     dailyGoal: goals.some(goal => goal === state.dailyGoal) ? state.dailyGoal : 10,
     activity: Number(state.version) >= 4 ? parseActivity(state.activity, now) : migrateActivity(session, reviewSession?.practice ?? null, catalog, now) }
 
@@ -48,7 +51,7 @@ export function loadLearningState(storage: Pick<Storage, 'getItem' | 'setItem'>,
     if (existing !== null) {
       const raw = parseJson(existing)
       value = parseLearningState(raw, catalog, now, legacyCatalog, deletedIds)
-      if (raw && typeof raw === 'object' && [1, 2, 3, 4, 5].includes(Number((raw as { version?: number }).version))) storage.setItem(LEARNING_STATE_KEY, JSON.stringify(value))
+      if (raw && typeof raw === 'object' && [1, 2, 3, 4, 5, 6].includes(Number((raw as { version?: number }).version))) storage.setItem(LEARNING_STATE_KEY, JSON.stringify(value))
       return { value, error: false }
     }
     for (const id of sanitizeIds(parseJson(storage.getItem('kelime-learned')), catalog)) { value.history[id].learned = true; value.history[id].legacyReviewPending = true }
@@ -71,5 +74,9 @@ export function assessLearningState(state: LearningState, known: boolean, now = 
 export function assessReviewState(state: LearningState, known: boolean, now = Date.now(), catalog: readonly VocabularyWord[] = words): LearningState {
   if (state.reviewSession?.practice.phase !== 'feedback') return state
   const next = assessReview(state.reviewSession, state.history, known, now)
-  return { ...state, ...next, activity: trackAssessment(state.activity, 'review', state.reviewSession.practice, next.reviewSession.practice, catalog, now) }
+  const result=next.reviewSession.practice.results.at(-1)!
+  const observed=activeRequests(state.reviewRequests,result.wordId,result.direction).map(r=>r.id).sort()
+  result.resolvedReviewRequestIds=observed
+  const reviewRequests=resolveRequests(state.reviewRequests,observed,result.wordId,result.direction,result.eventId!)
+  return { ...state, ...next, reviewRequests, activity: trackAssessment(state.activity, 'review', state.reviewSession.practice, next.reviewSession.practice, catalog, now) }
 }
