@@ -7,7 +7,7 @@ import { selectPracticeTargets } from './targetWordSelector.ts'
 import { validateFeedback, validateTutorTurn } from './feedbackValidator.ts'
 import { practiceProgress, transition } from './practiceModel.ts'
 import type { PracticeMode, PracticeSession, WordFeedback } from './practiceModel.ts'
-import type { AIPracticeProvider } from './provider.ts'
+import type { AIPracticeProvider, ProviderAction } from './provider.ts'
 import { createReviewRequests } from './reviewRequest.ts'
 import type { ReviewRequest } from './reviewRequest.ts'
 
@@ -17,6 +17,8 @@ export class PracticeService {
   private controller=new AbortController()
   private disposed=false
   private started=false
+  private pending:ProviderAction='prepare'
+  private requestId:string=''
   private readonly provider:AIPracticeProvider
   private readonly now:()=>number
   private readonly id:()=>string
@@ -25,25 +27,26 @@ export class PracticeService {
     this.provider=options.provider;this.now=options.now??Date.now;this.id=options.id??(()=>crypto.randomUUID())
     const at=this.now(),targets=selectPracticeTargets(options.quiz,options.catalog,options.history,at)
     if(!targets.length)throw Error('No available quiz words to practice.')
-    this.state={id:this.id(),sourceQuizId:options.quiz.syncId??null,targets,mode:options.mode,startedAt:at,endedAt:null,status:'preparing',turns:[],feedback:null,outcomes:[],error:null}
+    this.state={evaluator:options.mode==='voiceAnswer'?'deterministic':options.provider.evaluator??'mock',id:this.id(),sourceQuizId:options.quiz.syncId??null,targets,mode:options.mode,startedAt:at,endedAt:null,status:'preparing',turns:[],feedback:null,outcomes:[],error:null}
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
   getSnapshot=()=>this.state
   private publish(state:PracticeSession){this.state=state;for(const listener of this.listeners)listener()}
   private move(status:PracticeSession['status']){this.publish(transition(this.state,status,this.now()))}
   private get active(){return !this.disposed&&!this.controller.signal.aborted}
-  private request(){return {context:buildPracticeContext(this.state.targets,this.state.mode),turns:this.state.turns.map(t=>({...t}))}}
+  private request(){return {sessionId:this.state.id,requestId:this.requestId,context:buildPracticeContext(this.state.targets,this.state.mode),turns:this.state.turns.map(t=>({...t}))}}
   private tutor(text:string){this.publish({...this.state,turns:[...this.state.turns,{id:this.id(),role:'tutor',text,at:this.now()}]})}
   private currentTarget(){const pending=practiceProgress(this.state).unpracticed;return this.state.targets.find(t=>pending.includes(t.wordId))}
   private voicePrompt(){const target=this.currentTarget();if(!target)return 'All targets have been practiced. End practice to see your feedback.';const content=questionContent(target);return `What is the ${content.answerLang==='tr'?'Turkish':'English'} meaning of “${content.prompt}”?`}
-  private fail(){if(this.active){this.publish({...transition(this.state,'failed',this.now()),error:'Mock practice is currently unavailable. Your completed quiz is unchanged.'});this.controller.abort();this.provider.dispose()}}
+  private fail(){if(this.active&&this.provider.recoverable){this.publish({...transition(this.state,'retryable',this.now()),error:'The tutor could not complete this action. Retry may generate a new response and use the pilot budget.'});return}if(this.active){this.publish({...transition(this.state,'failed',this.now()),error:'Mock practice is currently unavailable. Your completed quiz is unchanged.'});this.controller.abort();this.provider.dispose()}}
   async start(){
     if(this.started||!this.active)return
-    this.started=true
+    this.started=true;this.pending='prepare';this.requestId=this.id()
     try{const message=this.state.mode==='voiceAnswer'?this.voicePrompt():validateTutorTurn(await this.provider.prepare(this.request(),this.controller.signal));if(!this.active)return;this.tutor(message);this.move('ready')}catch{this.fail()}
   }
   async submit(input:string){
     if(!this.active||this.state.status!=='ready'||!input.trim()||input.length>2000||this.state.turns.filter(t=>t.role==='learner').length>=16)return false
+    this.pending='respond';this.requestId=this.id()
     const target=this.currentTarget()
     if(!target)return false
     const turn={id:this.id(),role:'learner' as const,text:input.trim(),at:this.now(),targetWordId:target.wordId}
@@ -68,13 +71,31 @@ export class PracticeService {
   }
   private completeWords(outcomes:WordFeedback[]):WordFeedback[]{return this.state.targets.map(t=>outcomes.find(w=>w.wordId===t.wordId)??{wordId:t.wordId,outcome:'notAttempted',retrieval:'unassessed',semantic:'unassessed',grammar:'unassessed',evidence:[],explanation:'Not practiced in this session.'})}
   async end(){
-    if(!this.active||this.state.status!=='ready')return
-    this.move('processing')
+    if(!this.active||!['ready','retryable'].includes(this.state.status))return
+    this.pending='finish';this.requestId=this.id()
+    this.publish({...this.state,error:null});this.move('processing')
     try{
       const raw=this.state.mode==='voiceAnswer'?{words:this.completeWords(this.state.outcomes),corrections:[],strengths:[]}:await this.provider.finish(this.request(),this.controller.signal)
       if(!this.active)return
       const feedback=validateFeedback(raw,this.state.targets,this.state.turns)
       this.publish({...transition(this.state,'feedback',this.now()),feedback,outcomes:feedback.words})
+    }catch{this.fail()}
+  }
+  async retry(){
+    if(!this.active||this.state.status!=='retryable')return
+    this.publish({...this.state,error:null});this.move(this.pending==='prepare'?'preparing':'processing')
+    try{
+      const response=await this.provider[this.pending](this.request(),this.controller.signal)
+      if(!this.active)return
+      if(this.pending==='prepare'){this.tutor(validateTutorTurn(response));this.move('ready')}
+      else if(this.pending==='respond'){
+        const message=validateTutorTurn(response)
+        const feedback=validateFeedback((response as {feedback?:unknown}).feedback,this.state.targets,this.state.turns)
+        this.publish({...this.state,outcomes:feedback.words});this.tutor(message);this.move('ready')
+      }else{
+        const feedback=validateFeedback(response,this.state.targets,this.state.turns)
+        this.publish({...transition(this.state,'feedback',this.now()),feedback,outcomes:feedback.words})
+      }
     }catch{this.fail()}
   }
   stageReview(selected:readonly number[],catalog:readonly VocabularyWord[]){

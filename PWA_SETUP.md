@@ -50,7 +50,7 @@ Apply migrations in order to a test project before shipping the client:
 3. Apply `003_vocabulary_deletion.sql` for vocabulary deletion and reset commands.
 4. Apply `004_pronunciation.sql` for the synchronized pronunciation preference and protocol-4 RPCs.
 5. Apply `005_sync_reliability.sql` for receipt reconciliation and draft compaction.
-6. Apply `006_ai_practice_review.sql` before the current client for protocol-5 compact evidence, explicit review requests and reset metadata. Existing queue payloads and pre-v6 backups are retained. See [AI_PRACTICE.md](AI_PRACTICE.md).
+6. Apply `006_ai_practice_review.sql` before the current client for protocol-5 compact evidence, explicit review requests and reset metadata. Existing queue payloads and pre-v6 backups are retained. Also apply `007_ai_provider.sql` before the Phase 5A client for the evaluator whitelist and server-only usage reservations. The optional real text tutor requires a connection; mock and local Voice Answer remain available offline. See [AI_PRACTICE.md](AI_PRACTICE.md).
 5. Run the two-account/device verification below, then roll out the client.
 
 The first accepted v2 mutation upgrades that account. The legacy writer is locked out after upgrade; it cannot replace event-based progress. Keep queued legacy data until the updated client migrates it. Recoverable pending single assessments retain their operation identity; ambiguous changes become visible conflicts instead of guessed counter increments.

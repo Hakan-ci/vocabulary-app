@@ -8,7 +8,7 @@ const text=(value:unknown,max=1000):string=>{
   if(typeof value!=='string'||!value.trim()||value.length>max)throw Error('Invalid feedback text.')
   return value
 }
-export function validateFeedback(value:unknown,targets:readonly PracticeTarget[],turns:readonly PracticeTurn[]):ValidatedFeedback{
+export function validateFeedback(value:unknown,targets:readonly Pick<PracticeTarget,'wordId'>[],turns:readonly PracticeTurn[]):ValidatedFeedback{
   const raw=object(value),ids=new Set(targets.map(t=>t.wordId)),seen=new Set<number>()
   const learners=new Map(turns.filter(t=>t.role==='learner').map(t=>[t.id,t]))
   if(!Array.isArray(raw.words)||raw.words.length!==targets.length||!Array.isArray(raw.corrections)||raw.corrections.length>32||!Array.isArray(raw.strengths)||raw.strengths.length>8)throw Error('Invalid feedback structure.')

@@ -33,12 +33,12 @@ export function PracticeFeedback({session,service,onFinish,persistence}:{session
   const name=(id:number)=>session.targets.find(t=>t.wordId===id)!.snapshot.word.english
   return <section className="test-panel ai-practice" aria-label="AI practice feedback">
     <h2 tabIndex={-1} ref={heading}>AI Practice Complete</h2>
-    <p className="storage-notice">Mock feedback — vocabulary recognition is simulated. General language quality is not assessed.</p>
+    <p className="storage-notice">{session.evaluator==='openai'?'AI feedback — contextual judgments can be inaccurate.':session.evaluator==='deterministic'?'Local translation matching — context and grammar are unassessed.':'Mock feedback — vocabulary recognition is simulated. General language quality is not assessed.'}</p>
     <div className="test-stats directional-stats"><div><strong>{feedback.words.length}</strong><span>Target vocabulary</span></div>{(Object.keys(labels) as (keyof typeof labels)[]).map(outcome=><div key={outcome}><strong>{feedback.words.filter(w=>w.outcome===outcome).length}</strong><span>{labels[outcome]}</span></div>)}</div>
     <h3>Vocabulary feedback</h3>
     <ul className="ai-feedback-list">{feedback.words.map(word=><li key={word.wordId}><strong>{name(word.wordId)} · {labels[word.outcome]}</strong><p>{word.explanation}</p><p className="test-hint">Retrieval: {word.retrieval} · Context: {word.semantic} · Grammar: {word.grammar}</p></li>)}</ul>
     <h3>Grammar and vocabulary corrections</h3>
-    {feedback.corrections.length?<ul className="ai-feedback-list">{feedback.corrections.map((c,index)=><li key={index}><strong>{c.kind==='grammar'?'Grammar':'Vocabulary'} · {name(c.wordId)}</strong><p><q>{c.original}</q> → <q>{c.replacement}</q></p></li>)}</ul>:<p>No corrections from this mock. This does not establish grammatical correctness.</p>}
+    {feedback.corrections.length?<ul className="ai-feedback-list">{feedback.corrections.map((c,index)=><li key={index}><strong>{c.kind==='grammar'?'Grammar':'Vocabulary'} · {name(c.wordId)}</strong><p><q>{c.original}</q> → <q>{c.replacement}</q></p></li>)}</ul>:<p>No corrections reported. This does not establish grammatical correctness.</p>}
     {feedback.strengths.length>0&&<><h3>Strengths</h3><ul>{feedback.strengths.map(s=><li key={s}>{s}</li>)}</ul></>}
     <h3>Suggested review</h3>
     <p>Only selected suggestions are added to Review. AI outcomes do not change your Known/Missed history.</p>

@@ -5,7 +5,7 @@ import type { TestDirection } from '../learningTypes.ts'
 import type { VocabularyWord } from '../vocabulary.ts'
 
 export type EvidenceWord = Pick<WordFeedback,'wordId'|'outcome'|'retrieval'|'semantic'|'grammar'> & {direction:TestDirection;suggested:boolean}
-export type PracticeEvidence = {id:string;sourceQuizId:string|null;completedAt:number;mode:PracticeSession['mode'];evaluator:'mock';epoch:number;words:EvidenceWord[]}
+export type PracticeEvidence = {id:string;sourceQuizId:string|null;completedAt:number;mode:PracticeSession['mode'];evaluator:'mock'|'openai'|'deterministic';epoch:number;words:EvidenceWord[]}
 export type DurableReviewRequest = {id:string;wordId:number;direction:TestDirection;requestedAt:number;source:'aiPractice';sourceSessionId:string;epoch:number;status:'active'|'resolved'|'cancelled';resolvedBy?:string}
 export type ReviewRequests = Record<string,DurableReviewRequest>
 export const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
@@ -14,20 +14,20 @@ const epochValid=(v:unknown):v is number=>Number.isSafeInteger(v)&&Number(v)>=0
 export function compactEvidence(session:PracticeSession,epoch:number,completedAt:number):PracticeEvidence{
  if(!['feedback','completed'].includes(session.status)||!session.feedback)throw Error('Finalized feedback is required.')
  const feedback=validateFeedback(session.feedback,session.targets,session.turns)
- const evidence={id:session.id,sourceQuizId:session.sourceQuizId,completedAt,mode:session.mode,evaluator:'mock' as const,epoch,words:feedback.words.map(w=>({wordId:w.wordId,direction:session.targets.find(t=>t.wordId===w.wordId)!.direction,outcome:w.outcome,retrieval:w.retrieval,semantic:w.semantic,grammar:w.grammar,suggested:feedback.suggestedReviewWordIds.includes(w.wordId)}))}
+ const evidence={id:session.id,sourceQuizId:session.sourceQuizId,completedAt,mode:session.mode,evaluator:session.evaluator??'mock',epoch,words:feedback.words.map(w=>({wordId:w.wordId,direction:session.targets.find(t=>t.wordId===w.wordId)!.direction,outcome:w.outcome,retrieval:w.retrieval,semantic:w.semantic,grammar:w.grammar,suggested:feedback.suggestedReviewWordIds.includes(w.wordId)}))}
  const parsed=parseEvidence(evidence);if(!parsed)throw Error('Invalid practice evidence.');return parsed
 }
 export function parseEvidence(value:unknown):PracticeEvidence|null{
  if(!value||typeof value!=='object')return null
  const v=value as PracticeEvidence
- if(!uuid(v.id)||v.sourceQuizId!==null&&!uuid(v.sourceQuizId)||!timestamp(v.completedAt)||!epochValid(v.epoch)||v.evaluator!=='mock'||!['voiceAnswer','useTheWord','conversation'].includes(v.mode)||!Array.isArray(v.words)||v.words.length<1||v.words.length>8)return null
+ if(!uuid(v.id)||v.sourceQuizId!==null&&!uuid(v.sourceQuizId)||!timestamp(v.completedAt)||!epochValid(v.epoch)||!['mock','openai','deterministic'].includes(v.evaluator)||!['voiceAnswer','useTheWord','conversation'].includes(v.mode)||!Array.isArray(v.words)||v.words.length<1||v.words.length>8)return null
  const seen=new Set<number>(),words:EvidenceWord[]=[]
  for(const w of v.words){
   if(!w||!Number.isSafeInteger(w.wordId)||w.wordId<0||seen.has(w.wordId)||!isDirection(w.direction)||!['correct','partial','needsPractice','notAttempted'].includes(w.outcome)||!['recognized','missing','unassessed'].includes(w.retrieval)||!['acceptable','inappropriate','unassessed'].includes(w.semantic)||!['correct','needsCorrection','unassessed'].includes(w.grammar)||typeof w.suggested!=='boolean')return null
   if(w.outcome==='correct'&&(w.retrieval!=='recognized'||w.semantic==='inappropriate')||w.outcome==='partial'&&(w.retrieval!=='recognized'||w.semantic!=='inappropriate')||w.outcome==='needsPractice'&&w.retrieval!=='missing'&&w.semantic!=='inappropriate'||w.outcome==='notAttempted'&&(w.retrieval!=='unassessed'||w.semantic!=='unassessed'||w.grammar!=='unassessed')||w.suggested!==['partial','needsPractice'].includes(w.outcome))return null
   seen.add(w.wordId);words.push({wordId:w.wordId,direction:w.direction,outcome:w.outcome,retrieval:w.retrieval,semantic:w.semantic,grammar:w.grammar,suggested:w.suggested})
  }
- return {id:v.id,sourceQuizId:v.sourceQuizId,completedAt:v.completedAt,mode:v.mode,evaluator:'mock',epoch:v.epoch,words}
+ return {id:v.id,sourceQuizId:v.sourceQuizId,completedAt:v.completedAt,mode:v.mode,evaluator:v.evaluator,epoch:v.epoch,words}
 }
 export function parseRequest(value:unknown):DurableReviewRequest|null{
  if(!value||typeof value!=='object')return null

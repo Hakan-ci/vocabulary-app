@@ -25,6 +25,84 @@ export type Database = { public: { Tables: {
     }
     Relationships: []
   }
+  ai_practice_attempts: {
+    Row: {
+      id: string
+      owner_id: string
+      session_id: string
+      request_id: string
+      fingerprint: string
+      model: string
+      created_at: string
+      expires_at: string
+      cost_micros: number
+      status: string
+      latency_ms: number | null
+      input_tokens: number | null
+      output_tokens: number | null
+    }
+    Insert: {
+      id: string
+      owner_id: string
+      session_id: string
+      request_id: string
+      fingerprint: string
+      model: string
+      created_at?: string
+      expires_at: string
+      cost_micros: number
+      status: string
+      latency_ms?: number | null
+      input_tokens?: number | null
+      output_tokens?: number | null
+    }
+    Update: {
+      id?: string
+      owner_id?: string
+      session_id?: string
+      request_id?: string
+      fingerprint?: string
+      model?: string
+      created_at?: string
+      expires_at?: string
+      cost_micros?: number
+      status?: string
+      latency_ms?: number | null
+      input_tokens?: number | null
+      output_tokens?: number | null
+    }
+    Relationships: []
+  }
+  ai_practice_lock: {
+    Row: {
+      id: boolean
+    }
+    Insert: {
+      id?: boolean
+    }
+    Update: {
+      id?: boolean
+    }
+    Relationships: []
+  }
+  ai_practice_sessions: {
+    Row: {
+      id: string
+      owner_id: string
+      created_at: string
+    }
+    Insert: {
+      id: string
+      owner_id: string
+      created_at?: string
+    }
+    Update: {
+      id?: string
+      owner_id?: string
+      created_at?: string
+    }
+    Relationships: []
+  }
   assessment_events: {
     Row: {
       user_id: string

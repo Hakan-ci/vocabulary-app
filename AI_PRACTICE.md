@@ -1,6 +1,6 @@
-# Mock AI practice and persistent learning evidence
+# AI practice: mock, real text tutoring, and persistent evidence
 
-Daily Test completion offers **Practice with AI**, alongside the existing Start another test and View Learned actions. All three modes use typed input in this phase. The screen identifies the provider as a mock; no AI service, microphone, transcription, provider key, or billing is involved. Account persistence uses the existing Supabase synchronization service. Guests and accounts can both use the mock, including offline.
+Daily Test completion offers **Practice with AI**, alongside the existing Start another test and View Learned actions. All three modes use typed input in this phase. Mock is the default. Approved signed-in accounts can select OpenAI text tutoring when the server pilot is enabled; Voice Answer always checks typed translations locally. No microphone, transcription, audio, or conversation persistence is implemented. Account persistence uses the existing Supabase synchronization service. Guests and accounts can both use the mock, including offline.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ flowchart TD
     Quiz[Completed Daily Test + catalog + learning history] --> Selector[Deterministic target selector]
     Selector --> Service[Transient PracticeService]
     Service --> Context[Whitelisted context]
-    Context --> Provider[AIPracticeProvider / deterministic mock]
+    Context --> Provider[AIPracticeProvider: mock or authenticated Edge Function]
     Provider --> Validator[Runtime feedback validation]
     Validator --> UI[Conversation and feedback UI]
     UI --> Complete[completeAIPractice: compact evidence]
@@ -53,9 +53,9 @@ Targets preserve quiz direction and a deep copy of the frozen question snapshot,
 
 `buildPracticeContext` constructs each property explicitly. It includes target IDs, English, Turkish meanings, English alternatives, optional example/part of speech, direction, difficulty, quiz evidence, and relevant directional counters. It excludes account IDs, auth tokens, queue contents, devices, unrelated words, tags, and full history.
 
-The provider receives that context plus finalized learner/tutor turns. Turn identifiers allow evidence references; turn text is user-supplied content, not trusted instructions. A future provider must treat vocabulary examples and learner text as data too. This structural whitelist cannot prevent a learner from voluntarily typing personal information.
+The provider receives that context plus finalized learner/tutor turns. Turn identifiers allow evidence references; turn text is user-supplied content, not trusted instructions. The OpenAI adapter treats vocabulary examples and learner text as data too, beneath immutable server instructions. This structural whitelist cannot prevent a learner from voluntarily typing personal information.
 
-`AIPracticeProvider.prepare` returns an untrusted tutor message; `respond` returns an untrusted message and full per-target feedback; `finish` returns untrusted final feedback. Calls accept an abort signal; disposal releases provider resources. There are no SDK types. Use `AIPractice`'s optional `providerFactory` prop for test injection; production currently always constructs `MockPracticeProvider`.
+`AIPracticeProvider.prepare` returns an untrusted tutor message; `respond` returns an untrusted message and full per-target feedback; `finish` returns untrusted final feedback. Calls accept an abort signal; disposal releases provider resources. There are no SDK types. Use `AIPractice`'s optional `providerFactory` prop for test injection; production defaults to `MockPracticeProvider` and offers `OpenAIPracticeProvider` only after authenticated availability succeeds. `loadTransport` is an injected availability boundary used by isolated browser fixtures.
 
 ## Mock semantics and validation
 
@@ -69,11 +69,11 @@ Feedback separates retrieval (`recognized`, `missing`, `unassessed`), semantics 
 
 `validateFeedback` validates every provider result before it reaches UI state. It requires exactly one outcome per target; rejects unknown/non-target IDs, duplicate outcomes, invalid enums, oversized/malformed fields, unsupported evidence and corrections, contradictory success/failure states, and unsafe review recommendations. Evidence must name finalized learner turns; correction originals must occur in that evidence. Extra properties are stripped. Counts and suggested IDs are derived locally. Only partial/needsPractice vocabulary outcomes suggest review; a grammar-only issue does not.
 
-Validation establishes structural consistency, not factual certainty. Future provider evaluations remain fallible and cannot directly alter learning records.
+Validation establishes structural consistency, not factual certainty. Real provider evaluations remain fallible and cannot directly alter learning records.
 
 ## Lifecycle, persistence, and review requests
 
-Preparation transitions to ready. Submission transitions through processing back to ready. Ending validates feedback, then Finish completes the session. Cancellation/failure are terminal. Listening and tutorSpeaking statuses are reserved for future adapters. Duplicate/in-flight submissions are ignored; abort/disposal prevents late provider responses from updating state.
+Preparation transitions to ready. Submission transitions through processing back to ready. Ending validates feedback, then Finish completes the session. Cancellation and mock failures are terminal. OpenAI failures enter `retryable`; retry repeats the logical action with the same finalized learner turn. End Practice can request fresh final feedback from that state. Listening and tutorSpeaking statuses are reserved for future adapters. Duplicate/in-flight submissions are ignored; abort/disposal prevents late provider responses from updating state.
 
 Practice is limited to eight targets, at most sixteen learner turns, and 2,000 characters per response. Only finalized turns enter service state; drafts remain React state. Progress derives from validated outcomes. Source changes, navigation, account-scope changes, target removal, and unmount dispose the active service. Existing pronunciation stops on entry. Reload does not resume mock practice; the completed quiz remains intact.
 
@@ -81,7 +81,7 @@ Practice is limited to eight targets, at most sixteen learner turns, and 2,000 c
 
 Learning state **7** adds `learningEpoch`, `aiEvidence` and `reviewRequests`. Versions 1–6 load with empty AI collections and epoch zero. Malformed new records are dropped independently; malformed word references cannot discard valid vocabulary, quiz or history records. Historical evidence does not recreate deleted vocabulary.
 
-`Application.completeAIPractice` revalidates finalized feedback, selects a compact whitelist and saves once per practice-session UUID. The persisted record contains the source quiz UUID (nullable for historical sessions), completion time, mode, evaluator `mock`, epoch, and at most eight word/direction outcomes with retrieval, semantics, grammar and a suggested flag. It excludes turns, typed practice answers, explanations, corrections, strengths, prompts and audio. Existing deterministic quiz answers retain their existing storage behavior. A grammar-only correction cannot suggest vocabulary review.
+`Application.completeAIPractice` revalidates finalized feedback, selects a compact whitelist and saves once per practice-session UUID. The persisted record contains the source quiz UUID (nullable for historical sessions), completion time, mode, evaluator `mock`, `openai`, or `deterministic`, epoch, and at most eight word/direction outcomes with retrieval, semantics, grammar and a suggested flag. It excludes turns, typed practice answers, explanations, corrections, strengths, prompts and audio. Existing deterministic quiz answers retain their existing storage behavior. A grammar-only correction cannot suggest vocabulary review.
 
 **Add Selected to Review** calls `Application.requestReview` only after evidence is durable. Selected suggestions must occur in saved evidence and the current vocabulary. Each confirmation keeps a stable UUID, word, direction, timestamp, source, practice UUID, epoch and lifecycle (`active`, `resolved`, `cancelled`). UUIDs are deterministically derived with SHA-256 from the practice UUID and immutable target position, so confirmations agree across devices even when local numeric word IDs differ. Separate sessions retain separate provenance; one session/word/direction cannot create a second confirmation. Accepted suggestions are derived from linked requests, never written back into immutable evidence.
 
@@ -113,11 +113,11 @@ Synchronization protocol is **5**; serialized account caches are **6**. IndexedD
 
 The client uses `kelime_apply_v5`, `kelime_snapshot_v5`, `kelime_reconcile_v5` and `kelime_compact_drafts_v5`. After adoption, old mutation endpoints are blocked under the profile lock. The new endpoint accepts preserved legacy queue operations without rewriting their attempted payloads or attaching request resolution to old assessments. Migration-005 conflict classification, receipt reconciliation and draft-chain validation remain in force. Older endpoints keep their previous behavior on accounts not yet upgraded. `npm run db:types` regenerates the checked-in database types from executable migrations.
 
-## Future voice and real AI
+## Future voice (Phase 5B)
 
 A future adapter can attach microphone/transcription events to the reserved listening/speaking states and submit finalized transcripts through the same service. Keep partial transcripts, tokens, audio chunks, and connection state transient. Avoid overlapping existing pronunciation with recording.
 
-Real provider implementation requires a trusted authenticated backend, server-side secrets, bounded usage, timeout/shutdown behavior, and official API documentation verification at implementation time. Browser credentials, if needed, must be temporary. No permanent key belongs in Vite variables. No provider API names or model choices are assumed here.
+Phase 5A implements the trusted text backend described below. Future voice must retain these privacy and validation boundaries. No permanent provider key belongs in Vite variables.
 
 ## Development and checks
 
@@ -147,9 +147,9 @@ PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts
 
 `tests/pwa/aiPractice.spec.ts` exercises all three modes in the production build, asserts zero writes before End Practice and only recovery-envelope learning writes at the two durable checkpoints, checks unchanged mastery/quiz results, reloads requests into normal Review and resolves them by self-assessment. Keyboard focus, 320px layout and Axe checks remain. `playwright.ai.config.ts` uses a development-only fixture for provider failure and evidence/request storage failures with retries; no production failure controls exist.
 
-## Persistence-phase delivery report
+## Historical persistence-phase delivery report
 
-Real AI, microphone capture, transcription, provider endpoints/secrets, billing and persisted conversation/resume remain out of scope. Mock judgments remain scripted and limited; only compact outcomes and explicit requests are retained.
+At the end of the persistence phase, real AI, microphone capture, transcription, provider endpoints/secrets, billing and persisted conversation/resume were outside scope. Phase 5A below supersedes the real-text-provider limitation. Mock judgments remain scripted and limited; only compact outcomes and explicit requests are retained.
 
 Created files:
 
@@ -226,4 +226,120 @@ The system Node 22 runtime was not used for native TypeScript unit tests; the av
 
 An initial production run exposed a test selector that still targeted desktop navigation after changing to mobile width; the test now exercises Mobile navigation. An existing pronunciation assertion now polls for its already-asynchronous scheduled callback instead of racing it. No assertions were removed or skipped.
 
-No live Supabase project was contacted or migrated, and the client was not deployed. Apply migration 006 before deployment. Work stops at compact persistence and explicit Review integration; real provider/voice work remains a separate phase.
+No live Supabase project was contacted or migrated, and the client was not deployed. Apply migration 006 before deployment. That delivery stopped at compact persistence and explicit Review integration. The Phase 5A delivery follows.
+
+## Phase 5A: trusted real text tutoring
+
+The browser `OpenAIPracticeProvider` implements the existing provider contract. `providerConnection` binds authenticated requests to the account that passed availability; account changes reject subsequent calls. `PracticeService` controls evaluator identity, logical request UUIDs, and finalized learner turns. Retries preserve that turn and logical UUID and allocate a new attempt UUID only on an explicit user action. There is no automatic paid retry or silent fallback. Cancel, navigation, scope changes and disposal abort the request and ignore late results. The backend and browser have 30- and 35-second deadlines; expired database leases stop blocking after 45 seconds. Cancellation cannot guarantee that already dispatched provider work was free.
+
+The Edge Function has three small modules:
+
+- `index.ts`: environment, verified Supabase Auth user lookup, native HTTP and privileged RPC adapters. No provider SDK dependency.
+- `handler.ts`: exact-origin CORS, POST/OPTIONS, anonymous denial, account allowlist, bounded body reading, deadline/abort, keyed fingerprints, transactional reservation, fixed OpenAI endpoint, sanitized errors, settlement.
+- `contract.ts`: independent request whitelist, strict JSON schemas, immutable tutor instructions, Responses request construction, refusal/incomplete/JSON rejection, shared application feedback validation, token usage and conservative cost estimates.
+
+Only selected vocabulary, its bounded quiz/history counters, and finalized turns enter the model input. Session/request/attempt/account IDs, timestamps, authentication, unrelated vocabulary, device and sync state do not. Turn UUIDs and selected word IDs remain necessary for validated evidence. Learner/vocabulary instructions are serialized as untrusted user data under separate immutable instructions; no model tools are enabled. This mitigates instruction injection but cannot establish that every contextual judgment is correct. Model output must pass the backend validator and the same service validator before display or persistence.
+
+`gpt-5.6-terra` uses Responses with strict `text.format` JSON schema, `reasoning.effort: none`, `store: false`, `stream: false`, and at most 3,500 output tokens. All schema fields are required and objects disallow additional properties. Refusal, incomplete output, unsupported corrections, fabricated evidence IDs and contradictory results cannot reach the compact evidence command. No Conversations resources, previous response IDs, background requests or streaming drafts are used. Tutor text is capped at 1,500 characters. Application code derives review suggestions and summary counts; grammar alone cannot imply vocabulary failure.
+
+### Server limits and operational records
+
+| Limit | Enforcement |
+| --- | --- |
+| Body | 128 KiB, checked while reading, including bodies without Content-Length |
+| Context | 1–8 unique targets; English/meaning/alternative fields 300 chars each, up to 16 meanings/alternatives, example 1,000 chars, part of speech 100 chars |
+| Turns | 33 finalized turns, at most 16 learner turns, 2,000 chars per learner, 1,500 per tutor; valid unique UUIDs |
+| Generation rate | 6 reservations/minute/user, 100/day/user, 24/session |
+| Concurrency/lifetime | One unexpired in-flight reservation/user; 60-minute server-clock session lifetime |
+| Logical retries | At most two reserved attempts/logical request; duplicate attempt UUIDs never redispatch during retention |
+| Estimated budget | US$1/user/UTC day, US$10 globally/UTC day |
+| Retention | Seven days, hourly pg_cron cleanup; cleanup also runs before reservations |
+
+Migration 007 adds RLS-enabled, browser-inaccessible `ai_practice_sessions`, `ai_practice_attempts`, and a singleton transaction lock. Service-role-only reserve/settle RPCs serialize budget/rate checks and insert the reservation atomically. The lock is deliberately global for this small pilot. These tables never enter the account snapshot/outbox or learning data.
+
+Reserve cost uses UTF-8 serialized request bytes as a conservative token upper bound plus 2,048 framing tokens and maximum output. The estimate includes instructions and schema. Pricing verified on 2026-09-20 is US$2/million input tokens and US$12/million output tokens; reservation and reconciliation conservatively charge input at US$2.50/million to cover the documented 1.25× cache-write rate. Reported usage reduces the reservation; unknown usage retains the full estimate. No cached-input discount is assumed. Recheck model pricing before rollout. Rates are estimated controls, not a billing guarantee.
+
+Operational rows contain UUIDs, owner/session linkage, keyed HMAC fingerprint, model, timestamps/lease, status category, latency, available token counts and estimated microdollars. They contain no prompt, answer, raw provider response, reasoning, correction or credential. Database errors/provider text are never forwarded or logged. Infrastructure access logs and OpenAI retention have separate policies; operators must also avoid enabling request-body logging. `store: false` disables response application storage; it does **not** remove OpenAI abuse-monitoring or prompt-cache retention.
+
+A completed duplicate attempt cannot replay its response because responses are not stored. The UI explains that explicit retry can regenerate at additional estimated cost. A lost response after a committed reservation remains charged; an unknown settlement remains conservatively charged and its lease expires. Stable payload fingerprints prevent reusing a logical ID for different content. Deduplication metadata is retained only for the stated retention period, not forever.
+
+### Persistence compatibility
+
+Migration 007 replaces only the compact evaluator validator from 006 and adds operational objects. Existing `mock` evidence remains valid; real sessions use `openai`, while new Voice Answer sessions use `deterministic`. Learning state stays **7**, account cache **6**, sync protocol **5**. No queue, quiz matching, mastery formula or Review-resolution rule changes. No prompts, turns or correction text are persisted. End Practice still has one compact evidence checkpoint; Add Selected to Review is still explicit; resolution is still bundled with normal Review assessment.
+
+Older clients cannot display the new evaluator values and should update. Existing SQL namespace authorization and immutable evidence prevent ordinary old-client writes from replacing or deleting these records; explicit reset/clear-all retains its intended behavior. New evaluator values are not cryptographic proof of a model judgment—client and SQL validation establish structure and ownership, not linguistic truth.
+
+### Deployment and live evaluation
+
+See [Supabase setup](SUPABASE_SETUP.md#phase-5a-openai-text-pilot) for exact server variables and rollout. Apply migrations through 006, then 007; configure server secrets; deploy the function disabled; deploy the updated client; run bounded local verification; then enable only the allowlisted pilot after operator review. No live project was migrated or deployed in this work.
+
+`node scripts/evaluate-ai-practice.mjs` requires `AI_EVAL_URL` pointing to a **local** `/functions/v1/ai-practice`, `AI_EVAL_TOKEN` for an allowlisted test account, and `AI_EVAL_ORIGIN` matching server configuration. It never calls OpenAI directly or reads an OpenAI key. Four canned English–Turkish cases check grammar/vocabulary separation, correct context, unattempted vocabulary and instruction injection. It validates all feedback/evidence and records contextual expectations separately, emits no raw text, and stops before dispatch if total conservative reservations would exceed US$1. There are no automatic retries. The backend's normal pilot limits also apply.
+
+This environment has no server credentials or configured local Supabase backend. The evaluation command exited without calls; **live linguistic quality and hosted integration remain unverified and the pilot remains disabled**. Deno was obtained solely to type-check the Edge Function; no Supabase deploy, secrets upload or live migration command was executed. Phase 5B microphone capture, transcription, audio, Realtime, provider billing UI and persisted conversation/resume remain deferred.
+
+### Official sources verified for Phase 5A
+
+- [GPT-5.6 Terra model and pricing](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
+- [Responses text generation](https://developers.openai.com/api/docs/guides/text)
+- [Strict structured outputs and refusal handling](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [Manual conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
+- [OpenAI data controls and retention](https://developers.openai.com/api/docs/guides/your-data)
+- [Supabase authenticated functions](https://supabase.com/docs/guides/functions/auth-legacy-jwt)
+- [Supabase server secrets](https://supabase.com/docs/guides/functions/secrets)
+- [Supabase deployment](https://supabase.com/docs/guides/functions/deploy)
+
+### Phase 5A verification and file inventory (2026-09-20)
+
+| Command/check | Final result |
+| --- | --- |
+| `npm test` with Node 24 | 22 test files passed, including PGlite migrations/database/sync regressions; new provider suite has 11 cases and operational SQL suite has 5 cases |
+| `npm run lint` | Passed without warnings |
+| `npm run build` | TypeScript, production bundle and PWA generation passed |
+| `npm run db:types` with Node 24 | Regenerated successfully from migrations 001–007 |
+| `deno check --config supabase/functions/ai-practice/deno.json supabase/functions/ai-practice/index.ts` | Passed with Deno 2.9.6 |
+| `PLAYWRIGHT_CHANNEL=chromium npm run test:browser` | 16 production browser tests passed |
+| `PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts` | 8 isolated browser tests passed, including real-provider transport injection, failure/retry, cancellation, mobile/keyboard and local Voice Answer |
+| `node scripts/evaluate-ai-practice.mjs` with Node 24 | Blocked before dispatch: local backend/test credentials absent; no paid calls; pilot disabled |
+| `git diff --check` | Passed |
+
+Browser tests initially exposed an exact-label selector mismatch on the Tutor chooser; it now uses the combobox accessible role/name. Assertions were retained, and the entire AI suite passed afterward. Browser servers required sandbox permission. Node 24 and Chromium were used explicitly; Deno was downloaded for Edge type checks. Package manifests/lockfiles are unchanged. The final small availability-error handler also passed the production build and lint. Hosted Auth/gateway, pg_cron scheduling and live model quality require operator verification; local PGlite tests cover SQL behavior but do not substitute for hosted configuration.
+
+Created files (13):
+
+```text
+scripts/evaluate-ai-practice.mjs
+src/aiPractice/openAIProvider.ts
+src/aiPractice/providerConnection.ts
+supabase/config.toml
+supabase/functions/ai-practice/.env.example
+supabase/functions/ai-practice/contract.ts
+supabase/functions/ai-practice/deno.json
+supabase/functions/ai-practice/handler.ts
+supabase/functions/ai-practice/index.ts
+supabase/migrations/007_ai_provider.sql
+tests/ai-browser/openAI.spec.ts
+tests/aiProviderSql.test.mjs
+tests/openAIPractice.test.mjs
+```
+
+Modified files (15):
+
+```text
+.env.example
+AI_PRACTICE.md
+PWA_SETUP.md
+README.md
+SUPABASE_SETUP.md
+src/aiPractice/AIPractice.tsx
+src/aiPractice/PracticeFeedback.tsx
+src/aiPractice/feedbackValidator.ts
+src/aiPractice/learningEvidence.ts
+src/aiPractice/practiceModel.ts
+src/aiPractice/practiceService.ts
+src/aiPractice/provider.ts
+src/data/database.types.ts
+tests/browser/aiPractice.tsx
+tests/dbHarness.mjs
+```
+
+The persistence-phase implementation was preserved. The working tree was clean when Phase 5A implementation began; this inventory describes only Phase 5A changes. No live deployment or database migration was performed. Work stops at text-provider integration; Phase 5B audio/voice and persistent conversation work remain separate.

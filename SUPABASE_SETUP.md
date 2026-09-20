@@ -5,7 +5,7 @@ The app works without Supabase configuration. Guest data stays in its existing l
 ## Create a test project
 
 1. Create a project in the Supabase dashboard and retain the database password securely.
-2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`, `002_events.sql`, `003_vocabulary_deletion.sql`, `004_pronunciation.sql`, `005_sync_reliability.sql`, and `006_ai_practice_review.sql` in numeric order. Apply each migration once; do not delete production tables to reapply it.
+2. Open SQL Editor and execute `supabase/migrations/001_kelime.sql`, `002_events.sql`, `003_vocabulary_deletion.sql`, `004_pronunciation.sql`, `005_sync_reliability.sql`, `006_ai_practice_review.sql`, and `007_ai_provider.sql` in numeric order. Apply each migration once; do not delete production tables to reapply it.
 3. Enable the Email provider with email/password sign-in. Keep email confirmation enabled. Set Authentication → URL Configuration → Site URL to your app origin, for example `http://localhost:5173`. Add the exact development and production URLs to the Redirect URLs allowlist. Signup uses the current origin and pathname; confirmation redirects are handled by the Supabase client.
 4. Copy the project URL and a **public anon or publishable key** from the project connection/API settings. Never put a secret/service-role key or database password in Vite variables.
 5. Copy `.env.example` to `.env.local`, fill these values, and restart Vite:
@@ -97,3 +97,47 @@ Apply `004_pronunciation.sql` after migration 003. Protocol 4 adds the validated
 ## Persistent mock practice rollout (protocol 5)
 
 Apply `005_sync_reliability.sql`, then `006_ai_practice_review.sql` **before deploying the current client**. The client calls the v5 apply/snapshot/reconcile/compact-drafts RPCs. Evidence and explicit review requests use validated namespaces in `account_records`, the existing outbox, ownership/RLS and operation receipts. Snapshots include `profiles.reset_epoch`; stale AI writes are rejected after reset. Legacy attempted operations remain unchanged and use the v5 compatibility path. Older mutation endpoints are blocked once the account adopts protocol 5. No live deployment is included. See [AI practice architecture and verification](AI_PRACTICE.md) for privacy, request lifecycle, import and concurrency details.
+
+## Phase 5A OpenAI text pilot
+
+The default `VITE_AI_PRACTICE_PROVIDER=mock` requires no provider key. Set it to `openai` only in the updated browser build when preparing the pilot; real selection still requires successful authenticated backend availability. Guests, anonymous Supabase users and accounts outside the allowlist never gain access. Voice Answer always remains a local typed translation check.
+
+Apply migrations 001–006, then **007_ai_provider.sql**, before deploying the Phase 5A client. Migration 007 adds evaluator values and private operational reservation tables/RPCs without changing protocol 5/cache 6/learning 7. Enable Supabase Cron (`pg_cron`) before applying 007, and verify the `kelime-ai-retention` hourly job is present and runs successfully. The migration schedules it when the extension is available; PGlite tests cannot execute pg_cron and call cleanup directly. Do not enable the pilot without scheduled retention cleanup.
+
+Prepare a server-only environment file outside the repository using `supabase/functions/ai-practice/.env.example`:
+
+| Variable | Value |
+| --- | --- |
+| `OPENAI_API_KEY` | Server project key with appropriate OpenAI project budget/access |
+| `AI_PRACTICE_ENABLED` | `false` during deployment, `true` only after verification |
+| `AI_PRACTICE_ALLOWED_USER_IDS` | Comma-separated approved Supabase Auth UUIDs |
+| `AI_PRACTICE_ALLOWED_ORIGINS` | Comma-separated exact browser origins, including scheme and port; no wildcard |
+| `AI_PRACTICE_HASH_KEY` | At least 32 random characters for keyed operational fingerprints |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Supabase-provided Edge Function environment; never browser variables |
+
+Model, endpoint, token and spend limits are fixed in server code. No OpenAI credential uses a `VITE_` prefix. The function requires gateway JWT verification and independently verifies the bearer via Supabase Auth `/user`; operational RPCs use the server service role. Verify JWT/gateway compatibility with the project's signing configuration during local/staging checks. No request body is accepted as identity.
+
+Operator commands (documented only; **not run against a live project**):
+
+```sh
+supabase db push
+supabase secrets set --env-file <server-only-file>
+supabase functions deploy ai-practice
+```
+
+Order: migrations through 006 → 007 → disabled server configuration → Edge Function → updated client → bounded local evaluation and integration review → enable approved pilot. Use separate development and production keys/accounts. Avoid body logging at gateways or observability collectors. Existing account sync and review RPCs remain unchanged.
+
+Local checks with Node 24 and Deno:
+
+```sh
+npm test
+npm run lint
+npm run build
+npm run db:types
+deno check --config supabase/functions/ai-practice/deno.json supabase/functions/ai-practice/index.ts
+PLAYWRIGHT_CHANNEL=chromium npm run test:browser
+PLAYWRIGHT_CHANNEL=chromium npx playwright test --config=playwright.ai.config.ts
+node scripts/evaluate-ai-practice.mjs
+```
+
+The last command requires a local authenticated backend plus `AI_EVAL_URL`, `AI_EVAL_TOKEN`, and `AI_EVAL_ORIGIN`; it makes at most US$1 conservatively estimated calls with no retries. Missing credentials or failed quality checks must keep the pilot disabled. See [AI practice architecture](AI_PRACTICE.md#phase-5a-trusted-real-text-tutoring) for privacy, limits, retry semantics, source documentation and verification results.
