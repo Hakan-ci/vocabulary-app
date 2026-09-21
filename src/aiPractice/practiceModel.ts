@@ -2,15 +2,17 @@ import type { QuestionSnapshot } from '../dailyTestModel.ts'
 import type { Difficulty } from '../learningTypes.ts'
 
 export type PracticeMode = 'voiceAnswer' | 'useTheWord' | 'conversation'
-export const practiceModeLabels: Record<PracticeMode,string> = {voiceAnswer:'Voice Answer (typed simulation)',useTheWord:'Use the Word',conversation:'Conversation'}
-export type PracticeTarget = QuestionSnapshot & { difficulty: Difficulty; quizCorrect: boolean; quizKnown: boolean; newlyLearned: boolean; due: boolean; recent: {timesTested:number;timesKnown:number;timesMissed:number;consecutiveKnown:number} }
+export const practiceModeLabels: Record<PracticeMode,string> = {voiceAnswer:'Translation Check (typed)',useTheWord:'Use the Word',conversation:'Conversation — Text'}
+export type PracticeTarget = QuestionSnapshot & { difficulty: Difficulty; quizCorrect?: boolean; quizKnown?: boolean; newlyLearned: boolean; due: boolean; recent: {timesTested:number;timesKnown:number;timesMissed:number;consecutiveKnown:number} }
 export type PracticeTurn = { id:string; role:'learner'|'tutor'; text:string; at:number; targetWordId?:number }
 export type Outcome = 'correct'|'partial'|'needsPractice'|'notAttempted'
 export type WordFeedback = {wordId:number;outcome:Outcome;retrieval:'recognized'|'missing'|'unassessed';semantic:'acceptable'|'inappropriate'|'unassessed';grammar:'correct'|'needsCorrection'|'unassessed';evidence:string[];explanation:string}
 export type Correction = {wordId:number;turnId:string;kind:'grammar'|'vocabulary';original:string;replacement:string}
 export type ValidatedFeedback = {words:WordFeedback[];corrections:Correction[];strengths:string[];suggestedReviewWordIds:number[]}
 export type PracticeStatus = 'preparing'|'ready'|'listening'|'processing'|'tutorSpeaking'|'feedback'|'completed'|'cancelled'|'failed'|'retryable'
-export type PracticeSession = {evaluator?:'mock'|'openai'|'deterministic';id:string;sourceQuizId:string|null;targets:PracticeTarget[];mode:PracticeMode;startedAt:number;endedAt:number|null;status:PracticeStatus;turns:PracticeTurn[];feedback:ValidatedFeedback|null;outcomes:WordFeedback[];error:string|null}
+export type PracticeProvenance = 'automatic'|'manual'|'quizFollowup'
+export type PracticeStart = {targets:PracticeTarget[];sourceQuizId:string|null;provenance:PracticeProvenance;inputModality?:'text'|'voice'}
+export type PracticeSession = {provenance?:PracticeProvenance;inputModality?:'text'|'voice';evaluator?:'mock'|'openai'|'deterministic';id:string;sourceQuizId:string|null;targets:PracticeTarget[];mode:PracticeMode;startedAt:number;endedAt:number|null;status:PracticeStatus;turns:PracticeTurn[];feedback:ValidatedFeedback|null;outcomes:WordFeedback[];error:string|null}
 const transitions:Record<PracticeStatus,PracticeStatus[]> = {preparing:['ready','cancelled','failed','retryable'],ready:['processing','listening','feedback','cancelled','failed'],listening:['ready','processing','cancelled','failed'],processing:['ready','tutorSpeaking','feedback','cancelled','failed','retryable'],tutorSpeaking:['ready','cancelled','failed'],feedback:['completed','cancelled','failed'],retryable:['preparing','processing','cancelled','failed'],completed:[],cancelled:[],failed:[]}
 export function transition(session:PracticeSession,status:PracticeStatus,now:number):PracticeSession {
   if(!transitions[session.status].includes(status))throw Error('Invalid practice transition.')

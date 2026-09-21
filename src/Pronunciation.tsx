@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { PronunciationController } from './pronunciationController'
 import type { SpeakOptions } from './pronunciationController'
 import { PronunciationContext, PronunciationActionsContext, usePronunciation } from './pronunciationContext'
@@ -7,22 +7,25 @@ import type { PronunciationContextValue } from './pronunciationContext'
 export function PronunciationProvider({ children, controller: supplied }: { children: React.ReactNode; controller?: PronunciationController }) {
   const [controller] = useState(() => supplied ?? new PronunciationController(undefined,false))
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
+  const locks=useRef(0)
+  const acquire=useCallback(()=>{locks.current++;controller.stop();let released=false;return()=>{if(!released){released=true;locks.current--}}},[controller])
   const [seen] = useState(() => new Set<string>())
   useEffect(() => {controller.activate();return () => { if (!supplied) controller.dispose() }}, [controller, supplied])
   const autoSpeakOnce = useCallback((key: string, text: string, enabled: boolean, options?: Omit<SpeakOptions, 'key'>) => {
     if (seen.has(key)) return false
     seen.add(key)
-    return enabled ? controller.speak(text, { ...options, key }) : false
+    return enabled && !locks.current ? controller.speak(text, { ...options, key }) : false
   }, [controller, seen])
-  const speak = useCallback((text: string, options?: SpeakOptions) => controller.speak(text, options), [controller])
+  const speak = useCallback((text: string, options?: SpeakOptions) => !locks.current && controller.speak(text, options), [controller])
   const stop = useCallback(() => controller.stop(), [controller])
   const value = useMemo<PronunciationContextValue>(() => ({
     ...snapshot,
+    acquire,
     speak,
     stop,
     autoSpeakOnce,
-  }), [snapshot, speak, stop, autoSpeakOnce])
-  const actions=useMemo(()=>({speak,stop,autoSpeakOnce}),[speak,stop,autoSpeakOnce])
+  }), [snapshot, acquire, speak, stop, autoSpeakOnce])
+  const actions=useMemo(()=>({acquire,speak,stop,autoSpeakOnce}),[acquire,speak,stop,autoSpeakOnce])
   return <PronunciationActionsContext.Provider value={actions}><PronunciationContext.Provider value={value}>{children}</PronunciationContext.Provider></PronunciationActionsContext.Provider>
 }
 

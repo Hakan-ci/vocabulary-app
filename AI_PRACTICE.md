@@ -1,12 +1,70 @@
-# AI practice: mock, real text tutoring, and persistent evidence
+# AI Practice: independent text and realtime voice
 
-Daily Test completion offers **Practice with AI**, alongside the existing Start another test and View Learned actions. All three modes use typed input in this phase. Mock is the default. Approved signed-in accounts can select OpenAI text tutoring when the server pilot is enabled; Voice Answer always checks typed translations locally. No microphone, transcription, audio, or conversation persistence is implemented. Account persistence uses the existing Supabase synchronization service. Guests and accounts can both use the mock, including offline.
+**Daily Test** and **AI Practice** are independent navigation choices. AI Practice starts from automatic or manually selected vocabulary without creating or completing a quiz. Daily Test remains the standard deterministic quiz; its optional post-results shortcut still uses frozen quiz snapshots. On mobile, both paths are directly available and Progress is in More.
+
+Mock remains the default, including offline guest use. Use the Word and Conversation — Text support the existing allowlisted OpenAI text pilot. **Translation Check (typed)** replaces the misleading Voice Answer label while preserving the `voiceAnswer` stored enum and local matching. **Conversation — Voice** is a separately disabled pilot using GPT-Live 1. Validated completion saves compact evidence; only explicit Add Selected to Review creates review requests. Known/Missed, difficulty, scheduling and sync protocol remain unchanged.
+
+## Independent selection and contracts
+
+`PracticeStart` contains frozen targets, nullable `sourceQuizId`, provenance (`automatic`, `manual`, `quizFollowup`) and input modality. `PracticeService` retains the legacy quiz constructor path and accepts independent starts. `buildPracticeContext` omits quiz evidence when none exists. The backend accepts both context forms and never receives the catalog, account identity or sync state as model input.
+
+Automatic selection considers both directions per available word: active requests/normal review eligibility; existing weakness rule (difficulty above 50, or misses with fewer than two consecutive Known assessments); recent misses; newly learned completed-quiz evidence; practiced words untouched for seven days; untested vocabulary; remaining words. Recent means seven days. Sort by priority, descending existing directional difficulty, oldest last assessment/attempted AI evidence timestamp, numeric word ID, then English→Turkish. Select one direction per word, at most eight. No fabricated first-learned dates or new mastery counters. Manual selection is searchable, optional, 1–8 distinct available words, and uses the same direction ranking. A session's targets stay fixed.
+
+## Realtime voice architecture — Phase 5B
+
+Official documentation checked **2026-09-21**. Chosen model: `gpt-live-1`; transport: browser WebRTC; voice: `marin`; explicit `store:false`; client delegation with no tools or automatic Responses delegation.
+
+| Candidate | Current documented pricing | Decision |
+| --- | --- | --- |
+| [GPT-Live 1](https://developers.openai.com/api/docs/models/gpt-live-1) | $0.05 per connected minute, per-second billing; backend separate | Chosen for full-duplex conversation, natural interruptions, duration accounting and frontend event permissions. |
+| [GPT-Realtime-2.1](https://developers.openai.com/api/docs/models/gpt-realtime-2.1) | Audio $32 input/$64 output per million tokens; text $4/$24 | Stronger integrated reasoning/tools, unnecessary for this bounded conversation with separate evaluation. |
+| [GPT-Realtime-2.1 Mini](https://developers.openai.com/api/docs/models/gpt-realtime-2.1-mini) | Audio $10/$20 per million; text $0.60/$2.40 | Lower-cost Realtime alternative; not an automatic fallback. |
+| [GPT-Realtime-2](https://developers.openai.com/api/docs/models/gpt-realtime-2) | Audio $32/$64 per million; text $4/$24 | Older alternative to 2.1, not selected. |
+
+The authenticated `ai-practice` function handles `voiceAvailability`, `voiceCreate`, and owner-bound `voiceClose`. It independently validates bounded context, finalized history, IDs and SDP, reserves cost transactionally, creates the Live session using its server key, attaches trusted sideband supervision, then returns only SDP and deadline. Browser audio flows directly to OpenAI. No reusable OpenAI key/client secret enters the browser. Frontend data-channel commands are disabled; only input/output transcript deltas and error events are forwarded, excluding configuration/instructions. Server-selected settings cannot be replaced by request fields. Unsupported delegations receive a fixed, non-paid redirect back to practice.
+
+[WebRTC guidance](https://developers.openai.com/api/docs/guides/voice-webrtc), [server controls](https://developers.openai.com/api/docs/guides/voice-server-controls), [Live session lifecycle](https://developers.openai.com/api/docs/guides/live-conversations), [client delegation](https://developers.openai.com/api/docs/guides/live-delegation), [Live API reference](https://developers.openai.com/api/reference/typescript/resources/live/methods/create).
+
+### Microphone, turn handling and recovery
+
+Permission is requested only on Start Voice. States distinguish requesting/granted/denied/unavailable/device error. Supported browser echo cancellation, noise suppression and automatic gain are requested without custom DSP. An exclusive pronunciation lease stops and suppresses normal pronunciation while the voice screen is mounted. Media tracks, playback, timers, listeners and connections are released on cancellation, navigation, account change, reset or target removal.
+
+Live supplies native full-duplex turn handling; Realtime `server_vad`/`semantic_vad` settings are intentionally not applied. Mute and keyboard/pointer push-to-talk provide a fallback. WebRTC audio-level statistics drive approximate activity labels, not assessment or turn finalization. Native Live handles conversational interruption; captions are not proof that all tutor audio played. The actual device/acoustic behavior remains a live pilot gate.
+
+Transcript fragments are deduplicated and sorted by provider timeline, independently per speaker. Same-speaker fragments less than one second apart are grouped, bounded to 2,000 learner / 1,500 tutor characters. These groups are application display segments, not provider-guaranteed conversational turns. More than 16 learner segments or 33 total segments ends capture without silently evaluating overflow. At End Practice, microphone/playback stop, the server closes the session, and the user reviews heard text. Excluded segments and tutor captions do not enter final evaluation. Recognized text cannot be rewritten in this phase.
+
+`VoiceSession` and `browserVoiceConnector` are injectable. Only the existing structured text evaluator (`gpt-5.6-terra`) plus shared validators can produce final feedback. Repeated feedback actions preserve finalized learner IDs and logical request identity. Reconnect is explicit, requires confirmed previous closure, obtains a new reservation/connection, and seeds bounded in-memory history. It cannot restore audio or guarantee perfect continuation. Failed authorization and uncertain closures never trigger automatic paid retries. Text practice remains available.
+
+### Cost, operational privacy and shutdown
+
+Pilot: two-minute deadline from reservation, one active session/account, three globally, three creation attempts/minute/account and four/day/account. Each connection reserves $0.20 (including the initialization/shutdown margin); final text evaluation reserves separately. Text and voice share $1/account/day and $10/global/day UTC budgets under the same transactional lock. Reported voice seconds reconcile costs with a 15-second initialization minimum; unknown usage retains the reservation.
+
+A trusted sideband deadline and authenticated minute cleanup endpoint enforce shutdown independently of the browser. Availability requires a cleanup heartbeat within 90 seconds and no overdue/uncertain sessions. The cleanup process also removes operational records after seven days. If an unresolved connection reaches retention age, only a non-identifying blocked safety latch remains; an operator must investigate before clearing it. A creation response lost before a provider ID is known cannot be automatically reconciled: the reservation remains charged and voice fails closed. No exactly-once billing or hard invoice cap is promised.
+
+The native Deno WebSocket implementation must support Authorization headers and the deployed runtime must support `EdgeRuntime.waitUntil`. Worker lifetime alone is not a guarantee: [Supabase limits](https://supabase.com/docs/guides/functions/limits) require the independent scheduler. No healthy scheduler means no pilot. Conservative reservations cannot guarantee costs during a simultaneous provider/control-plane outage.
+
+Operational tables contain only IDs, keyed fingerprints, model, lifecycle/deadline and usage/cost. No SDP, credentials, audio, transcript, prompts, raw responses or reasoning are logged/stored. `store:false` disables Live recording/fork storage, not separate OpenAI abuse monitoring. [Data controls](https://developers.openai.com/api/docs/guides/your-data) currently describe 30-day abuse-monitoring retention for Live; do not claim zero provider retention.
+
+### Evidence migration and compatibility
+
+Migration **008_independent_ai_voice.sql** adds server-only voice controls and version-2 compact evidence metadata (`schemaVersion`, `provenance`, `inputModality`). Voice uses existing mode `conversation`, evaluator `openai`, and the existing completion/review commands. Independent sourceQuizId is null. Legacy records retain their exact shape; no backfill or fabricated quiz. Learning state 7, cache format 6 and sync protocol 5 are unchanged. Existing explicit word-reference codecs/import remapping preserve metadata and UUID identities. Server immutable-record checks prevent older clients from overwriting new evidence after stripping unfamiliar fields; clients should update together. Migrations 006/007 are unchanged.
+
+### Operator steps (not executed)
+
+1. Keep `VITE_AI_PRACTICE_PROVIDER=mock` and `AI_PRACTICE_VOICE_ENABLED=false` during setup. Apply migrations through 008 with `supabase db push` only after selecting/reviewing the intended project.
+2. Configure a server-only env file: existing `OPENAI_API_KEY`, `AI_PRACTICE_ENABLED`, `AI_PRACTICE_ALLOWED_USER_IDS`, `AI_PRACTICE_ALLOWED_ORIGINS`, `AI_PRACTICE_HASH_KEY`, plus `AI_PRACTICE_VOICE_ENABLED=false` and random `AI_PRACTICE_CLEANUP_SECRET` (at least 32 characters). Supabase supplies URL/service credentials. No OpenAI/cleanup secret uses a VITE prefix.
+3. Operator commands: `supabase secrets set --env-file <server-only-file>` then `supabase functions deploy ai-practice`. Keep gateway JWT verification enabled.
+4. In Supabase Vault, configure `kelime_project_url`, `kelime_service_role_key`, `kelime_voice_cleanup_secret`. Run the reviewed [scheduler SQL](scripts/configure-voice-cleanup.sql) as an administrator. It sends the service-role bearer plus the cleanup secret to `/functions/v1/ai-practice/cleanup` each minute. Verify HTTP 204 and fresh health metadata. Do not grant operational tables/RPCs to browsers.
+5. Deploy the updated client. For the allowlisted test environment only, expose real selection with `VITE_AI_PRACTICE_PROVIDER=openai` and enable the server voice flag after the non-paid checks pass. Run the separate [opt-in live evaluation checklist](VOICE_EVALUATION.md). Keep the public pilot disabled until real supervision, acoustic quality and cost checks pass. This implementation did not deploy, expand the allowlist, send real audio, or run paid evaluations.
+
+The following sections document the existing text/persistence architecture and earlier phase verification; the independent entry and voice behavior above supersede historical post-quiz-only descriptions.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    Quiz[Completed Daily Test + catalog + learning history] --> Selector[Deterministic target selector]
+    Catalog[Catalog + history + review eligibility] --> Selector[Deterministic target selector]
+    Quiz[Optional completed Daily Test] --> Selector
     Selector --> Service[Transient PracticeService]
     Service --> Context[Whitelisted context]
     Context --> Provider[AIPracticeProvider: mock or authenticated Edge Function]
@@ -41,7 +99,7 @@ New modules in `src/aiPractice/`:
 
 `App.tsx` coordinates entry from `DailyTest.tsx`. No new state library is used. `PracticeService` follows the existing subscription/getSnapshot convention, and React uses `useSyncExternalStore`. Its constructor accepts a provider, clock, and ID generator. It has no repository, storage, authentication, or sync dependency.
 
-## Selection and snapshots
+## Quiz follow-up selection and snapshots
 
 Select at most eight distinct words from completed quiz results which are still present in the current catalog. Selection does not expand into unrelated vocabulary. Fewer than five candidates are valid; zero candidates leaves a return-to-results message.
 
@@ -113,7 +171,7 @@ Synchronization protocol is **5**; serialized account caches are **6**. IndexedD
 
 The client uses `kelime_apply_v5`, `kelime_snapshot_v5`, `kelime_reconcile_v5` and `kelime_compact_drafts_v5`. After adoption, old mutation endpoints are blocked under the profile lock. The new endpoint accepts preserved legacy queue operations without rewriting their attempted payloads or attaching request resolution to old assessments. Migration-005 conflict classification, receipt reconciliation and draft-chain validation remain in force. Older endpoints keep their previous behavior on accounts not yet upgraded. `npm run db:types` regenerates the checked-in database types from executable migrations.
 
-## Future voice (Phase 5B)
+## Historical voice roadmap (superseded by Phase 5B above)
 
 A future adapter can attach microphone/transcription events to the reserved listening/speaking states and submit finalized transcripts through the same service. Keep partial transcripts, tokens, audio chunks, and connection state transient. Avoid overlapping existing pronunciation with recording.
 
@@ -394,3 +452,9 @@ No files or migrations were created. Database types were not regenerated because
 | `git diff --check` | Passed |
 
 No tests were skipped or weakened. Browser execution required sandbox permission to launch local servers and Chromium; permission was granted and both suites completed. No unresolved local verification blockers remain. The unchanged configuration examples still specify `VITE_AI_PRACTICE_PROVIDER=mock` and `AI_PRACTICE_ENABLED=false`. Live provider evaluation, hosted deployment and audio integration were not attempted, as required by the audit scope.
+
+## Phase 5B local verification and delivery
+
+The implementation report and exact created/modified file inventory are in [AI_PRACTICE_COMPLETION.md](AI_PRACTICE_COMPLETION.md). New tests cover independent selection and metadata, account identity/import round trips, transient voice grouping and exclusions, transport cleanup, trusted backend authorization, supervision, combined budgets, rate/concurrency limits, heartbeat/retention behavior, and mobile/keyboard flows. Existing quiz, Review, persistence, synchronization, PGlite and browser assertions remain enabled. Browser test navigation was updated to use Progress in More; no assertions were removed.
+
+No real audio, real provider generation, production migration, secret upload, function deployment or pilot enablement was performed. Real acoustic quality, provider access and deployed runtime supervision remain release gates. Local browser suites require permission to bind their test servers and launch Chromium outside the filesystem sandbox; this was granted. No check was weakened to bypass that restriction.

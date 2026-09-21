@@ -1,1 +1,1 @@
-{"compilerOptions":{"strict":true,"lib":["deno.window","dom","esnext"]}}
+{"compilerOptions":{"strict":true,"lib":["deno.window","esnext"]}}

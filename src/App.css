@@ -237,3 +237,10 @@ button,input,select,textarea,summary{touch-action:manipulation}button:focus-visi
 .test-panel.ai-practice .ai-review-selection input { width: 20px; height: 20px; min-height: 20px; flex: 0 0 20px; padding: 0; }
 .ai-feedback-list p { margin: .5rem 0; line-height: 1.5; }
 .ai-practice :focus-visible { outline: 3px solid #44775b; outline-offset: 3px; }
+
+.ai-word-picker { display:grid; gap:.5rem; max-height:18rem; overflow:auto; margin-block:1rem; text-align:left; }
+.ai-word-picker label { display:flex; align-items:center; gap:.75rem; min-height:44px; }
+.ai-practice fieldset { min-width:0; margin-block:1rem; border:1px solid #aebdaf; border-radius:.5rem; }
+.ai-practice input:not([type=checkbox]) { width:100%; box-sizing:border-box; padding:.75rem; }
+.test-panel.ai-practice input[type=checkbox] { width:20px; height:20px; min-height:20px; flex:0 0 20px; padding:0; }
+.ai-practice button { margin:.25rem; }

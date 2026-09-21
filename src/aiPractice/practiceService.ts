@@ -6,7 +6,7 @@ import { buildPracticeContext } from './contextBuilder.ts'
 import { selectPracticeTargets } from './targetWordSelector.ts'
 import { validateFeedback, validateTutorTurn } from './feedbackValidator.ts'
 import { practiceProgress, transition } from './practiceModel.ts'
-import type { PracticeMode, PracticeSession, WordFeedback } from './practiceModel.ts'
+import type { PracticeMode, PracticeSession, PracticeStart, PracticeTurn, WordFeedback } from './practiceModel.ts'
 import type { AIPracticeProvider, ProviderAction } from './provider.ts'
 import { createReviewRequests } from './reviewRequest.ts'
 import type { ReviewRequest } from './reviewRequest.ts'
@@ -23,11 +23,11 @@ export class PracticeService {
   private readonly now:()=>number
   private readonly id:()=>string
   private requests:ReviewRequest[]=[]
-  constructor(options:{quiz:TestSession;catalog:readonly VocabularyWord[];history:LearningHistory;mode:PracticeMode;provider:AIPracticeProvider;now?:()=>number;id?:()=>string}){
+  constructor(options:{quiz?:TestSession;start?:PracticeStart;catalog:readonly VocabularyWord[];history:LearningHistory;mode:PracticeMode;provider:AIPracticeProvider;now?:()=>number;id?:()=>string}){
     this.provider=options.provider;this.now=options.now??Date.now;this.id=options.id??(()=>crypto.randomUUID())
-    const at=this.now(),targets=selectPracticeTargets(options.quiz,options.catalog,options.history,at)
-    if(!targets.length)throw Error('No available quiz words to practice.')
-    this.state={evaluator:options.mode==='voiceAnswer'?'deterministic':options.provider.evaluator??'mock',id:this.id(),sourceQuizId:options.quiz.syncId??null,targets,mode:options.mode,startedAt:at,endedAt:null,status:'preparing',turns:[],feedback:null,outcomes:[],error:null}
+    const at=this.now(),targets=structuredClone(options.start?.targets??(options.quiz?selectPracticeTargets(options.quiz,options.catalog,options.history,at):[]))
+    if(!targets.length||targets.length>8||new Set(targets.map(t=>t.wordId)).size!==targets.length||targets.some(t=>!options.catalog.some(w=>w.id===t.wordId)))throw Error('No available words to practice.')
+    this.state={evaluator:options.mode==='voiceAnswer'?'deterministic':options.provider.evaluator??'mock',id:this.id(),sourceQuizId:options.start?options.start.sourceQuizId:options.quiz?.syncId??null,provenance:options.start?.provenance??'quizFollowup',inputModality:options.start?.inputModality??'text',targets,mode:options.mode,startedAt:at,endedAt:null,status:'preparing',turns:[],feedback:null,outcomes:[],error:null}
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
   getSnapshot=()=>this.state
@@ -39,6 +39,10 @@ export class PracticeService {
   private currentTarget(){const pending=practiceProgress(this.state).unpracticed;return this.state.targets.find(t=>pending.includes(t.wordId))}
   private voicePrompt(){const target=this.currentTarget();if(!target)return 'All targets have been practiced. End practice to see your feedback.';const content=questionContent(target);return `What is the ${content.answerLang==='tr'?'Turkish':'English'} meaning of “${content.prompt}”?`}
   private fail(){if(this.active&&this.provider.recoverable){this.publish({...transition(this.state,'retryable',this.now()),error:'The tutor could not complete this action. Retry may generate a new response and use the pilot budget.'});return}if(this.active){this.publish({...transition(this.state,'failed',this.now()),error:'Mock practice is currently unavailable. Your completed quiz is unchanged.'});this.controller.abort();this.provider.dispose()}}
+  async evaluateVoice(turns:PracticeTurn[]){
+    if(this.started||!this.active||this.state.inputModality!=='voice'||turns.length>16||turns.some(t=>t.role!=='learner'||!t.text.trim()||t.text.length>2000)||new Set(turns.map(t=>t.id)).size!==turns.length)return
+    this.started=true;this.publish({...this.state,turns:structuredClone(turns)});this.move('ready');await this.end()
+  }
   async start(){
     if(this.started||!this.active)return
     this.started=true;this.pending='prepare';this.requestId=this.id()

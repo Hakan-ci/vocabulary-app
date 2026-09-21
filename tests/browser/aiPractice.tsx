@@ -1,4 +1,5 @@
-import {useState} from 'react'
+import type {VoiceConnector} from '../../src/aiPractice/voiceSession'
+import {StrictMode,useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {AIPractice} from '../../src/aiPractice/AIPractice'
 import type {ProviderRequest} from '../../src/aiPractice/provider'
@@ -28,13 +29,28 @@ Object.assign(window,{practiceCalls:calls})
 let providerFailed=false
 const mock=new MockPracticeProvider()
 const transport:PracticeTransport=async(body,signal)=>{
+ if((body as {action:string}).action==='voiceAvailability')return {available:scenario.startsWith('voice')}
  const r=body as ProviderRequest&{action:'prepare'|'respond'|'finish';attemptId:string}
  calls.push({action:r.action,requestId:r.requestId,attemptId:r.attemptId,learnerIds:r.turns.filter(t=>t.role==='learner').map(t=>t.id)})
- if(scenario==='real-retry'&&r.action==='respond'&&!providerFailed){providerFailed=true;throw Error('Injected unavailable response')}
+ if((scenario==='real-retry'&&r.action==='respond'||scenario==='voice-retry'&&r.action==='finish')&&!providerFailed){providerFailed=true;throw Error('Injected unavailable response')}
  if(scenario==='real-invalid'&&r.action==='finish')return {words:[],corrections:[],strengths:[]}
  if(scenario==='real-cancel'&&r.action==='respond')await new Promise(resolve=>setTimeout(resolve,1000))
  return mock[r.action](r,signal)
 }
-const loadTransport=async()=>scenario.startsWith('real')?transport:null
-export function Fixture(){const [open,setOpen]=useState(true);return <main><p>Source quiz: {state.session!.phase}</p>{open?<AIPractice persistence={persistence} quiz={state.session!} history={state.history} catalog={words} loadTransport={loadTransport} providerFactory={scenario.startsWith('real')?undefined:()=>new MockPracticeProvider(scenario==='provider'?{failAt:'respond'}:{})} onExit={()=>setOpen(false)}/>:<h1>Completed quiz results</h1>}</main>}
-createRoot(document.getElementById('root')!).render(<Fixture/> )
+const loadTransport=async()=>scenario.startsWith('real')||scenario.startsWith('voice')?transport:null
+const voiceStats={starts:0,closes:0,disposals:0}
+Object.assign(window,{voiceStats})
+const voiceConnector:VoiceConnector=async(emit,_signal,_history,microphone)=>{
+ voiceStats.starts++;microphone('requesting')
+ if(scenario==='voice-denied'){microphone('denied');throw Error('Denied')}
+ microphone('granted')
+ const timer=setTimeout(()=>{
+  emit({type:'session.input_transcript.delta',event_id:'learner'+voiceStats.starts,delta:'I practice '+words[0].english+' in a sentence.',start_ms:0,end_ms:100})
+  emit({type:'session.input_transcript.delta',event_id:'misheard'+voiceStats.starts,delta:'Misheard private sentence.',start_ms:2000,end_ms:2100})
+  emit({type:'session.output_transcript.delta',event_id:'tutor'+voiceStats.starts,delta:'Tell me more.',start_ms:500,end_ms:600})
+  emit({type:'activity',learner:true,tutor:true})
+ },50)
+ return {close:async()=>{voiceStats.closes++;return true},dispose:()=>{clearTimeout(timer);voiceStats.disposals++},mute:()=>{}}
+}
+export function Fixture(){const [open,setOpen]=useState(true);return <main><p>Source quiz: {state.session!.phase}</p>{open?<AIPractice persistence={persistence} quiz={scenario.startsWith('voice')?undefined:state.session!} learning={state} voiceConnector={voiceConnector} history={state.history} catalog={words} loadTransport={loadTransport} providerFactory={scenario.startsWith('real')||scenario.startsWith('voice')?undefined:()=>new MockPracticeProvider(scenario==='provider'?{failAt:'respond'}:{})} onExit={()=>setOpen(false)}/>:<h1>Completed quiz results</h1>}</main>}
+createRoot(document.getElementById('root')!).render(<StrictMode><Fixture/></StrictMode>)

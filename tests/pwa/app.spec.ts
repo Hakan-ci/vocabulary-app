@@ -4,7 +4,11 @@ import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 async function ready(page:import('@playwright/test').Page){await page.goto('/');await expect(page.getByRole('heading',{name:/Your vocabulary/})).toBeVisible();await page.evaluate(async()=>{await navigator.serviceWorker.ready});await page.reload();await page.waitForFunction(()=>!!navigator.serviceWorker.controller)}
-async function nav(page:import('@playwright/test').Page,name:RegExp){await page.getByRole('navigation',{name:page.viewportSize()!.width<768?'Mobile navigation':'Main navigation'}).getByRole('button',{name}).click()}
+async function nav(page:import('@playwright/test').Page,name:RegExp){
+ const mobile=page.viewportSize()!.width<768
+ if(mobile&&name.test('Progress')){await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Progress',exact:true}).click();return}
+ await page.getByRole('navigation',{name:mobile?'Mobile navigation':'Main navigation'}).getByRole('button',{name}).click()
+}
 async function mockSpeech(page:import('@playwright/test').Page){await page.addInitScript(()=>{
   class Utterance {text:string;lang='';rate=1;voice:any=null;onstart:(()=>void)|null=null;onend:(()=>void)|null=null;onerror:(()=>void)|null=null;constructor(text:string){this.text=text}}
   const voices=[{lang:'en-GB',default:true,name:'English'},{lang:'en-US',default:false,name:'US English'}]

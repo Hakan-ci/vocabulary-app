@@ -1,11 +1,13 @@
+import { handleVoice } from './voice.ts'
+import type { VoiceBackend } from './voice.ts'
 import { extractResponse, modelBody, MODEL, parseRequest, reservationMicros, usage, validateResult } from './contract.ts'
-export type BackendDependencies={
+export type BackendDependencies=VoiceBackend & {
   enabled:boolean;allowedUsers:readonly string[];origins:readonly string[];apiKey:string;hashKey:string
   authenticate:(token:string,signal:AbortSignal)=>Promise<{id:string;anonymous:boolean}|null>
   rpc:(name:string,args:Record<string,unknown>)=>Promise<unknown>
   fetch:typeof fetch;now?:()=>number;deadline?:()=>AbortSignal
 }
-async function boundedJSON(request:Request,signal:AbortSignal){
+export async function boundedJSON(request:Request,signal:AbortSignal){
   if(Number(request.headers.get('content-length'))>131072||!request.body)throw Error('invalid_request')
   const reader=request.body.getReader(),chunks:Uint8Array[]=[];let size=0
   const abort=()=>{void reader.cancel()}
@@ -14,7 +16,7 @@ async function boundedJSON(request:Request,signal:AbortSignal){
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}
   return JSON.parse(new TextDecoder().decode(bytes)) as unknown
 }
-async function fingerprint(value:unknown,secret:string){
+export async function fingerprint(value:unknown,secret:string){
   const encoder=new TextEncoder(),key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign'])
   return Array.from(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(JSON.stringify(value)))),b=>b.toString(16).padStart(2,'0')).join('')
 }
@@ -37,6 +39,7 @@ export function createHandler(deps:BackendDependencies){return async(request:Req
     if(!deps.allowedUsers.includes(user.id))return reply(403,{error:'unavailable'})
     category='invalid_request';const raw=await boundedJSON(request,signal)
     if(raw&&typeof raw==='object'&&(raw as {action?:unknown}).action==='availability')return reply(200,{available:true})
+    if(raw&&typeof raw==='object'&&String((raw as {action?:unknown}).action).startsWith('voice'))return reply(200,await handleVoice(raw,user.id,deps,signal))
     category='invalid_request';const input=parseRequest(raw),body=modelBody(input)
     const payloadHash=await fingerprint({action:input.action,context:input.context,turns:input.turns},deps.hashKey)
     category='limit';const result=await deps.rpc('kelime_ai_reserve',{p_owner:user.id,p_session:input.sessionId,p_request:input.requestId,p_attempt:input.attemptId,p_fingerprint:payloadHash,p_model:MODEL,p_cost:reservationMicros(body)})

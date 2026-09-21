@@ -1,0 +1,43 @@
+import {test,expect} from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+async function start(page:import('@playwright/test').Page,scenario='voice'){
+ await page.goto('/tests/browser/aiPractice.html?scenario='+scenario)
+ await expect(page.getByRole('option',{name:'Conversation — Voice',exact:true})).toBeEnabled()
+ await page.getByLabel('Practice mode').selectOption('voice')
+ await page.getByRole('button',{name:'Start Voice',exact:true}).click()
+}
+test('voice reviews heard text before a single compact completion; excludes misheard text, keyboard and mobile',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await start(page)
+ await expect(page.getByRole('status')).toContainText('interrupted')
+ const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!))
+ expect(before.aiEvidence).toEqual({})
+ await page.getByRole('button',{name:'End Practice'}).click()
+ await expect(page.getByRole('heading',{name:'Review what was heard'})).toBeVisible()
+ await page.getByLabel('Include in feedback').nth(1).uncheck()
+ await page.getByRole('button',{name:'Get feedback',exact:true}).focus();await page.keyboard.press('Enter')
+ await expect(page.getByRole('status')).toContainText('Practice outcomes saved')
+ const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!))
+ expect(after.history).toEqual(before.history);expect(after.session).toEqual(before.session);expect(after.reviewRequests).toEqual({})
+ expect(Object.values(after.aiEvidence)).toHaveLength(1)
+ expect(Object.values(after.aiEvidence)[0]).toMatchObject({schemaVersion:2,provenance:'automatic',inputModality:'voice',sourceQuizId:null,evaluator:'openai'})
+ expect(JSON.stringify(after.aiEvidence)).not.toMatch(/Misheard|sentence|turns|transcript/)
+ const calls=await page.evaluate(()=>(window as any).practiceCalls);expect(calls).toHaveLength(1);expect(calls[0].learnerIds).toHaveLength(1)
+ const stats=await page.evaluate(()=>(window as any).voiceStats);expect(stats.starts).toBe(1);expect(stats.closes).toBe(1)
+ await page.setViewportSize({width:320,height:740});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+ expect((await new AxeBuilder({page}).include('.ai-practice').analyze()).violations).toEqual([])
+})
+test('voice feedback retry preserves learner IDs and creates no duplicate evidence',async({page})=>{
+ await start(page,'voice-retry');await expect(page.getByRole('status')).toContainText('interrupted');await page.getByRole('button',{name:'End Practice'}).click();await page.getByRole('button',{name:'Get feedback',exact:true}).click()
+ await expect(page.getByRole('button',{name:'Retry feedback'})).toBeVisible()
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!).aiEvidence)).toEqual({})
+ await page.getByRole('button',{name:'Retry feedback'}).click();await expect(page.getByRole('status')).toContainText('Practice outcomes saved')
+ const calls=await page.evaluate(()=>(window as any).practiceCalls);expect(calls).toHaveLength(2);expect(calls[0].requestId).toBe(calls[1].requestId);expect(calls[0].learnerIds).toEqual(calls[1].learnerIds)
+})
+test('denied microphone and cancellation preserve learning; explicit reconnect uses a new connection',async({page})=>{
+ await start(page,'voice-denied');await expect(page.getByRole('status')).toContainText('denied');await page.getByRole('button',{name:'Return to practice'}).click()
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!).aiEvidence)).toEqual({})
+ await start(page);await expect(page.getByRole('status')).toContainText('interrupted');await page.getByRole('button',{name:'End Practice'}).click();await page.getByRole('button',{name:'Reconnect with a new voice session'}).click();await expect(page.getByRole('status')).toContainText('interrupted')
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.getByRole('heading',{name:'Completed quiz results'})).toBeVisible()
+ expect(await page.evaluate(()=>(window as any).voiceStats.starts)).toBe(2)
+ expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!).aiEvidence)).toEqual({})
+})

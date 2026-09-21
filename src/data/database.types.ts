@@ -103,6 +103,66 @@ export type Database = { public: { Tables: {
     }
     Relationships: []
   }
+  ai_voice_health: {
+    Row: {
+      id: boolean
+      checked_at: string | null
+      blocked: boolean
+    }
+    Insert: {
+      id?: boolean
+      checked_at?: string | null
+      blocked?: boolean
+    }
+    Update: {
+      id?: boolean
+      checked_at?: string | null
+      blocked?: boolean
+    }
+    Relationships: []
+  }
+  ai_voice_sessions: {
+    Row: {
+      id: string
+      owner_id: string
+      practice_id: string
+      fingerprint: string
+      model: string
+      provider_id: string | null
+      created_at: string
+      deadline: string
+      status: string
+      cost_micros: number
+      usage_seconds: number | null
+    }
+    Insert: {
+      id: string
+      owner_id: string
+      practice_id: string
+      fingerprint: string
+      model?: string
+      provider_id?: string | null
+      created_at?: string
+      deadline?: string
+      status?: string
+      cost_micros?: number
+      usage_seconds?: number | null
+    }
+    Update: {
+      id?: string
+      owner_id?: string
+      practice_id?: string
+      fingerprint?: string
+      model?: string
+      provider_id?: string | null
+      created_at?: string
+      deadline?: string
+      status?: string
+      cost_micros?: number
+      usage_seconds?: number | null
+    }
+    Relationships: []
+  }
   assessment_events: {
     Row: {
       user_id: string
