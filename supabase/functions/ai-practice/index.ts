@@ -3,7 +3,7 @@ import { sweepVoice } from './voice.ts'
 declare const EdgeRuntime:{waitUntil:(task:Promise<void>)=>void}
 import { createHandler } from './handler.ts'
 const env=(name:string)=>Deno.env.get(name)??''
-const url=env('SUPABASE_URL'),serviceKey=env('SUPABASE_SERVICE_ROLE_KEY')
+const url=env('SUPABASE_URL'),serviceKey=env('AI_PRACTICE_SERVICE_ROLE_KEY')||env('SUPABASE_SERVICE_ROLE_KEY')
 const split=(name:string)=>env(name).split(',').map(s=>s.trim()).filter(Boolean)
 const deps={voiceEnabled:env('AI_PRACTICE_VOICE_ENABLED')==='true',supervise:supervisor(id=>new WebSocket(`wss://api.openai.com/v1/live/sessions/${encodeURIComponent(id)}/attach`,{headers:{Authorization:`Bearer ${env('OPENAI_API_KEY')}`}}),task=>EdgeRuntime.waitUntil(task)),enabled:env('AI_PRACTICE_ENABLED')==='true',allowedUsers:split('AI_PRACTICE_ALLOWED_USER_IDS'),origins:split('AI_PRACTICE_ALLOWED_ORIGINS'),apiKey:env('OPENAI_API_KEY'),hashKey:env('AI_PRACTICE_HASH_KEY'),fetch,
   async authenticate(token:string,signal:AbortSignal){
