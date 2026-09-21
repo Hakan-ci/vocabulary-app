@@ -3,7 +3,7 @@ import {parseRequest,modelBody,reservationMicros,validateResult} from '../supaba
 const endpoint=process.env.AI_EVAL_URL,token=process.env.AI_EVAL_TOKEN,origin=process.env.AI_EVAL_ORIGIN
 if(!endpoint||!token||!origin){console.error('Live evaluation not run: local backend URL, test account token and allowed origin are required. Keep the pilot disabled.');process.exit(1)}
 const url=new URL(endpoint)
-if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||url.pathname!=='/functions/v1/ai-practice')throw Error('Only a local trusted ai-practice backend is permitted.')
+if(!['localhost','127.0.0.1','[::1]','sqqcwkwunrmvsccyaxqr.supabase.co'].includes(url.hostname)||url.pathname!=='/functions/v1/ai-practice')throw Error('Only a local trusted ai-practice backend is permitted.')
 const cases=[
  {name:'grammar-separated',text:'I want achieve my goal.',check:w=>w.outcome==='correct'&&w.grammar==='needsCorrection'},
  {name:'correct-context',text:'I worked hard to achieve my goal.',check:w=>w.outcome==='correct'},
