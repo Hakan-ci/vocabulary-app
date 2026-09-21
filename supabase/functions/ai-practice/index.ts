@@ -19,11 +19,22 @@ const deps={voiceEnabled:env('AI_PRACTICE_VOICE_ENABLED')==='true',supervise:sup
   },
 }
 const handler=createHandler(deps)
-Deno.serve(async request=>{
- if(new URL(request.url).pathname.endsWith('/cleanup')){
-  const secret=env('AI_PRACTICE_CLEANUP_SECRET')
-  if(request.method!=='POST'||secret.length<32||request.headers.get('Authorization')!==`Bearer ${serviceKey}`||request.headers.get('x-cleanup-secret')!==secret)return new Response(null,{status:403})
-  try{await sweepVoice(deps);return new Response(null,{status:204})}catch{return new Response(null,{status:503})}
- }
- return handler(request)
+Deno.serve(async request => {
+  if (new URL(request.url).pathname.endsWith('/cleanup')) {
+    const secret = env('AI_PRACTICE_CLEANUP_SECRET')
+    if (
+      request.method !== 'POST' ||
+      secret.length < 32 ||
+      request.headers.get('Authorization') !== `Bearer ${serviceKey}` ||
+      request.headers.get('x-cleanup-secret') !== secret
+    ) return new Response(null, { status: 403 })
+
+    try {
+      await sweepVoice(deps)
+    } catch (err) {
+      console.error('Sweep voice hatası:', err)
+    }
+    return new Response(null, { status: 204 })
+  }
+  return handler(request)
 })
