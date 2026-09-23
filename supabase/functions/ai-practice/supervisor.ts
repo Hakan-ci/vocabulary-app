@@ -1,5 +1,6 @@
+import type { ControlSocket } from './sidebandSocket.ts'
 /** Trusted sideband: no raw event or conversation logging. Socket factory is injected. */
-export function supervisor(createSocket:(id:string)=>WebSocket,keepAlive:(task:Promise<void>)=>void,now:()=>number=Date.now){
+export function supervisor(createSocket:(id:string)=>ControlSocket,keepAlive:(task:Promise<void>)=>void,now:()=>number=Date.now){
  return async(providerId:string,deadline:number,onClosed:(seconds:number|null)=>Promise<void>,onFailure:()=>Promise<void>)=>{
   const socket=createSocket(providerId);let finished=false,resolveDone:()=>void=()=>{}
   const done=new Promise<void>(resolve=>{resolveDone=resolve});keepAlive(done)

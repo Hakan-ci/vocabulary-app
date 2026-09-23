@@ -66,3 +66,17 @@ test('voice errors distinguish request, limits, provider and supervision without
  for(const [overrides,status,error] of cases){const f=fixture(overrides),res=await f.handler(http(input()));assert.equal(res.status,status);assert.deepEqual(await res.json(),{error})}
  const f=fixture(),body=input();body.sdp='invalid';const res=await f.handler(http(body));assert.equal(res.status,400);assert.deepEqual(await res.json(),{error:'invalid_request'});assert.equal(f.paid.length,0)
 })
+
+test('sideband adapter authenticates in headers, bounds transport, forwards text and sanitizes errors',async()=>{
+ const {authenticatedSidebandSocket}=await import('../supabase/functions/ai-practice/sidebandSocket.ts')
+ const events={},sent=[];let captured,terminated=0,opened=0,errors=0,closed=0
+ const socket=authenticatedSidebandSocket('live_example','PRIVATE',(url,options)=>{captured={url,options};return {readyState:1,on(event,fn){events[event]=fn},send:text=>sent.push(text),terminate:()=>terminated++}})
+ assert.equal(captured.url,'wss://api.openai.com/v1/live/sessions/live_example/attach')
+ assert(!captured.url.includes('PRIVATE'));assert.equal(captured.options.headers.Authorization,'Bearer PRIVATE')
+ assert.equal(captured.options.followRedirects,false);assert.equal(captured.options.handshakeTimeout,10000);assert.equal(captured.options.maxPayload,32000)
+ socket.onopen=()=>opened++;socket.onerror=(...args)=>{assert.equal(args.length,0);errors++};socket.onclose=()=>closed++
+ const messages=[];socket.onmessage=e=>messages.push(e.data)
+ events.open();events.message(Buffer.from('{"type":"session.closed"}'),false);events.message(Buffer.from('binary'),true);events.error(Error('SECRET'));events.close()
+ socket.send('command');socket.close()
+ assert.equal(opened,1);assert.equal(errors,1);assert.equal(closed,1);assert.equal(terminated,1);assert.deepEqual(sent,['command']);assert.deepEqual(messages,['{"type":"session.closed"}'])
+})
