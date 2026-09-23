@@ -35,7 +35,7 @@ test('voice denial, malformed requests, exhausted reservations and duplicated de
 })
 test('sideband failure hangs up; lost creation remains uncertain without paid automatic retry',async()=>{
  const f=fixture({supervise:async()=>{throw Error('SECRET')}}),response=await f.handler(http(input()))
- assert.equal(response.status,400);assert.equal(f.paid.length,2);assert(f.paid[1].url.endsWith('/hangup'));assert.doesNotMatch(JSON.stringify(await response.json()),/SECRET/)
+ assert.equal(response.status,502);assert.equal(f.paid.length,2);assert(f.paid[1].url.endsWith('/hangup'));assert.doesNotMatch(JSON.stringify(await response.json()),/SECRET/)
  const lost=fixture({fetch:async()=>{throw Error('lost')}});await lost.handler(http(input()));assert.equal(lost.rpc.at(-1).args.p_action,'uncertain')
 })
 test('closing is owner-bound, remains available when voice disabled; sweep reports healthy only after cleanup succeeds',async()=>{
@@ -52,4 +52,17 @@ test('supervision handles usage once, sanitizes client delegation and forces dea
  assert.equal(socket.sent.length,2);assert(!JSON.stringify(socket.sent).includes('LEAK'))
  socket.onmessage({data:JSON.stringify({type:'session.closed',usage:{seconds:4}})});await kept;socket.onclose();assert.equal(settled,1);assert.equal(failed,0)
  const timed=supervise('live_test',Date.now()+5,async()=>settled++,async()=>failed++);socket.onopen();await timed;await kept;assert.equal(failed,1)
+})
+
+test('voice errors distinguish request, limits, provider and supervision without leaking content',async()=>{
+ const cases=[
+  [{voiceEnabled:false},503,'voice_unavailable'],
+  [{rpc:async()=> 'budget'},429,'voice_budget'],
+  [{rpc:async()=> 'rate_limit'},429,'voice_rate_limit'],
+  [{rpc:async()=>{throw Error('PRIVATE database')}},503,'voice_reservation_unavailable'],
+  [{fetch:async()=>Response.json({error:'SECRET'},{status:400})},502,'voice_provider_rejected'],
+  [{supervise:async()=>{throw Error('PRIVATE socket')}},502,'voice_supervision_failed'],
+ ]
+ for(const [overrides,status,error] of cases){const f=fixture(overrides),res=await f.handler(http(input()));assert.equal(res.status,status);assert.deepEqual(await res.json(),{error})}
+ const f=fixture(),body=input();body.sdp='invalid';const res=await f.handler(http(body));assert.equal(res.status,400);assert.deepEqual(await res.json(),{error:'invalid_request'});assert.equal(f.paid.length,0)
 })
