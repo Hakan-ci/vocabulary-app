@@ -101,3 +101,57 @@ test('new evaluator evidence round-trips through guest recovery and account wire
  assert.equal(round.learning.aiEvidence[session.id].evaluator,'openai');assert.equal(cells['ai-evidence/'+session.id].words[0].wordId,'b:0');assert.deepEqual(app.current.learning.history,before)
  assert.deepEqual(app.current.learning.reviewRequests,{});s.dispose()
 })
+
+test('generation schema mirrors application text bounds and restricts evidence to learner IDs',()=>{
+ const r=parseRequest(request('respond'))
+ r.turns.unshift({id:id(),role:'tutor',text:'Try achieve.',at:0})
+ const schema=modelBody(r).text.format.schema, f=schema.properties.feedback.properties
+ assert.equal(schema.properties.message.maxLength,1500)
+ assert.equal(schema.properties.message.minLength,1)
+ assert.equal(f.words.minItems,r.context.targets.length)
+ assert.equal(f.words.maxItems,r.context.targets.length)
+ assert.deepEqual(f.words.items.properties.wordId.enum,[0])
+ assert.deepEqual(f.words.items.properties.evidence.items.enum,[r.turns[1].id])
+ assert.equal(f.words.items.properties.explanation.maxLength,1000)
+ assert.equal(f.strengths.items.maxLength,300)
+ assert.equal(f.corrections.items.properties.original.maxLength,1000)
+ assert.deepEqual(f.corrections.items.properties.turnId.enum,[r.turns[1].id])
+ const empty=request('finish');empty.turns=[]
+ const noEvidence=modelBody(parseRequest(empty)).text.format.schema.properties
+ assert.equal(noEvidence.words.items.properties.evidence.maxItems,0)
+ assert.equal(noEvidence.corrections.maxItems,0)
+ assert.equal(modelBody(parseRequest(request())).text.format.schema.properties.message.maxLength,1500)
+})
+
+test('invalid output returns a safe diagnostic code, settles once, and does not retry generation',async()=>{
+ const cases=[
+  [{status:'incomplete',incomplete_details:{reason:'max_output_tokens'}},'output_incomplete'],
+  [{status:'completed',output:[{type:'message',role:'assistant',content:[{type:'refusal',refusal:'PRIVATE'}]}]},'output_refused'],
+  [{status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'PRIVATE invalid JSON'}]}]},'output_json'],
+  [envelope({message:'x'.repeat(1501)}),'output_text_bounds'],
+ ]
+ for(const [value,detail] of cases){
+  let calls=0
+  const b=backend({fetch:async()=>{calls++;return Response.json(value)}})
+  const response=await b.handler(http(request()))
+  assert.equal(response.status,502)
+  assert.deepEqual(await response.json(),{error:'invalid_output',detail})
+  assert.equal(calls,1)
+  assert.equal(b.reservations.filter(r=>r.name==='kelime_ai_settle').length,1)
+  assert.equal(b.reservations.at(-1).args.p_status,'invalid_output')
+ }
+})
+
+test('service displays sanitized invalid-output errors and keeps rejected feedback out of completion',async()=>{
+ const {practiceResponseError}=await import('../src/aiPractice/providerError.ts')
+ const mock=new MockPracticeProvider()
+ const s=service(new OpenAIPracticeProvider((body,signal)=>body.action==='prepare'?mock.prepare(body,signal):Promise.reject(practiceResponseError({error:'invalid_output',detail:'PRIVATE'}))))
+ await s.start();await s.submit('achieve')
+ assert.equal(s.getSnapshot().status,'retryable')
+ assert.match(s.getSnapshot().error,/could not be validated/)
+ assert(!s.getSnapshot().error.includes('PRIVATE'))
+ await s.end();assert.equal(s.getSnapshot().status,'retryable')
+ assert.throws(()=>compactEvidence(s.getSnapshot(),0,Date.now()))
+ assert(!practiceResponseError({error:'PRIVATE',message:'SECRET'}).message.includes('SECRET'))
+ s.dispose()
+})

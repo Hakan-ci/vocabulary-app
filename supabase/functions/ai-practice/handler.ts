@@ -1,6 +1,6 @@
 import { handleVoice } from './voice.ts'
 import type { VoiceBackend } from './voice.ts'
-import { extractResponse, modelBody, MODEL, parseRequest, reservationMicros, usage, validateResult } from './contract.ts'
+import { extractResponse, modelBody, MODEL, outputFailureDetail, parseRequest, reservationMicros, usage, validateResult } from './contract.ts'
 export type BackendDependencies=VoiceBackend & {
   enabled:boolean;allowedUsers:readonly string[];origins:readonly string[];apiKey:string;hashKey:string
   authenticate:(token:string,signal:AbortSignal)=>Promise<{id:string;anonymous:boolean}|null>
@@ -54,7 +54,7 @@ export function createHandler(deps:BackendDependencies){return async(request:Req
     signal.throwIfAborted()
     category='success'
     return reply(200,output)
-  }catch{return reply(category==='invalid_request'?400:502,{error:signal.aborted?'timeout':category})}
+  }catch(error){return reply(category==='invalid_request'?400:502,{error:signal.aborted?'timeout':category,...(!signal.aborted&&category==='invalid_output'?{detail:outputFailureDetail(error)}:{})})}
   finally{
     if(reservation){try{await deps.rpc('kelime_ai_settle',{p_owner:reservation.owner,p_attempt:reservation.attempt,p_status:signal.aborted?'timeout':category,p_latency:Math.max(0,(deps.now??Date.now)()-started),p_input:reported?.input??null,p_output:reported?.output??null})}catch{/* Reservation remains charged and expires without logging content. */}}
   }

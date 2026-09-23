@@ -1,3 +1,4 @@
+import { PracticeProviderError } from './providerError.ts'
 import { questionContent, questionMatches } from '../dailyTestModel.ts'
 import type { TestSession } from '../dailyTestModel.ts'
 import type { VocabularyWord } from '../vocabulary.ts'
@@ -38,7 +39,7 @@ export class PracticeService {
   private tutor(text:string){this.publish({...this.state,turns:[...this.state.turns,{id:this.id(),role:'tutor',text,at:this.now()}]})}
   private currentTarget(){const pending=practiceProgress(this.state).unpracticed;return this.state.targets.find(t=>pending.includes(t.wordId))}
   private voicePrompt(){const target=this.currentTarget();if(!target)return 'All targets have been practiced. End practice to see your feedback.';const content=questionContent(target);return `What is the ${content.answerLang==='tr'?'Turkish':'English'} meaning of “${content.prompt}”?`}
-  private fail(){if(this.active&&this.provider.recoverable){this.publish({...transition(this.state,'retryable',this.now()),error:'The tutor could not complete this action. Retry may generate a new response and use the pilot budget.'});return}if(this.active){this.publish({...transition(this.state,'failed',this.now()),error:'Mock practice is currently unavailable. Your completed quiz is unchanged.'});this.controller.abort();this.provider.dispose()}}
+  private fail(error?:unknown){if(this.active&&this.provider.recoverable){this.publish({...transition(this.state,'retryable',this.now()),error:error instanceof PracticeProviderError?error.message:'The tutor could not complete this action. Retry may generate a new response and use the pilot budget.'});return}if(this.active){this.publish({...transition(this.state,'failed',this.now()),error:'Mock practice is currently unavailable. Your completed quiz is unchanged.'});this.controller.abort();this.provider.dispose()}}
   async evaluateVoice(turns:PracticeTurn[]){
     if(this.started||!this.active||this.state.inputModality!=='voice'||turns.length>16||turns.some(t=>t.role!=='learner'||!t.text.trim()||t.text.length>2000)||new Set(turns.map(t=>t.id)).size!==turns.length)return
     this.started=true;this.publish({...this.state,turns:structuredClone(turns)});this.move('ready');await this.end()
@@ -46,7 +47,7 @@ export class PracticeService {
   async start(){
     if(this.started||!this.active)return
     this.started=true;this.pending='prepare';this.requestId=this.id()
-    try{const message=this.state.mode==='voiceAnswer'?this.voicePrompt():validateTutorTurn(await this.provider.prepare(this.request(),this.controller.signal));if(!this.active)return;this.tutor(message);this.move('ready')}catch{this.fail()}
+    try{const message=this.state.mode==='voiceAnswer'?this.voicePrompt():validateTutorTurn(await this.provider.prepare(this.request(),this.controller.signal));if(!this.active)return;this.tutor(message);this.move('ready')}catch(error){this.fail(error)}
   }
   async submit(input:string){
     if(!this.active||this.state.status!=='ready'||!input.trim()||input.length>2000||this.state.turns.filter(t=>t.role==='learner').length>=16)return false
@@ -71,7 +72,7 @@ export class PracticeService {
         this.publish({...this.state,outcomes:feedback.words});this.tutor(message)
       }
       this.move('ready');return true
-    }catch{this.fail();return false}
+    }catch(error){this.fail(error);return false}
   }
   private completeWords(outcomes:WordFeedback[]):WordFeedback[]{return this.state.targets.map(t=>outcomes.find(w=>w.wordId===t.wordId)??{wordId:t.wordId,outcome:'notAttempted',retrieval:'unassessed',semantic:'unassessed',grammar:'unassessed',evidence:[],explanation:'Not practiced in this session.'})}
   async end(){
@@ -83,7 +84,7 @@ export class PracticeService {
       if(!this.active)return
       const feedback=validateFeedback(raw,this.state.targets,this.state.turns)
       this.publish({...transition(this.state,'feedback',this.now()),feedback,outcomes:feedback.words})
-    }catch{this.fail()}
+    }catch(error){this.fail(error)}
   }
   async retry(){
     if(!this.active||this.state.status!=='retryable')return
@@ -100,7 +101,7 @@ export class PracticeService {
         const feedback=validateFeedback(response,this.state.targets,this.state.turns)
         this.publish({...transition(this.state,'feedback',this.now()),feedback,outcomes:feedback.words})
       }
-    }catch{this.fail()}
+    }catch(error){this.fail(error)}
   }
   stageReview(selected:readonly number[],catalog:readonly VocabularyWord[]){
     if(!this.active||this.state.status!=='feedback')throw Error('Practice feedback is no longer active.')
