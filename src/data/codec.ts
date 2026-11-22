@@ -10,15 +10,54 @@ export function reference(id: number,map: IdentityMap): string {
   if(id<1_000_000)return `b:${id}`
   if(!map.localToCloud[id])map.localToCloud[id]=newId()
   map.nextId=Math.max(map.nextId,id+1)
-  return `u:${map.localToCloud[id]}`
+  const ref=`u:${map.localToCloud[id]}`
+  usedReferences?.push([id,ref])
+  return ref
 }
+// Performance: encodeData runs on every save and re-encoded every ARCHIVED session —
+// the one part of the state that grows with every test taken (~33% of a signed-in
+// click at 200 tests). Archived records are finished and never edited in place (the
+// app only replaces them), so an archived record object that was encoded before is
+// reused, provided (a) its cheap fingerprint still matches and (b) every vocabulary
+// reference it resolved still maps to the same cloud ID. Cached cells are deep-frozen,
+// so a consumer mutating a cell would throw instead of corrupting later saves.
+type Encoded={map:IdentityMap;refs:[number,string][];fingerprint:string;cell:Json|undefined}
+type ArchivedRecord={archivedAt?:number;practice:{syncId?:string;phase:string;index:number;results:unknown[]}}
+const fingerprint=(r:ArchivedRecord)=>`${r.archivedAt}|${r.practice.syncId}|${r.practice.phase}|${r.practice.index}|${r.practice.results.length}`
+let usedReferences:[number,string][]|undefined
+const deepFreeze=<T,>(value:T):T=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.freeze(value);for(const v of Object.values(value))deepFreeze(v)}return value}
+function encodeArchived(memo:WeakMap<object,Encoded>,source:ArchivedRecord,map:IdentityMap,build:()=>Json|undefined):Json|undefined{
+  const hit=memo.get(source),print=fingerprint(source)
+  if(hit&&hit.map===map&&hit.fingerprint===print&&hit.refs.every(([id,ref])=>ref===`u:${map.localToCloud[id]}`))return hit.cell
+  const refs:[number,string][]=[];usedReferences=refs
+  let cell:Json|undefined
+  try{cell=build()}finally{usedReferences=undefined}
+  memo.set(source,{map,refs,fingerprint:print,cell:deepFreeze(cell)})
+  return cell
+}
+const archivedRecords=new WeakMap<object,Encoded>()
 export function localId(ref: string,map: IdentityMap): number {
   if(/^b:\d+$/.test(ref))return Number(ref.slice(2))
   if(!/^u:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref))throw Error('Invalid vocabulary identity received.')
-  const uuid=ref.slice(2),found=Object.entries(map.localToCloud).find(([,v])=>v===uuid)
-  if(found)return Number(found[0])
+  const uuid=ref.slice(2),index=decodeIndex?.map===map?decodeIndex.byCloud:undefined
+  if(index){const known=index.get(uuid);if(known!==undefined)return known}
+  else{const found=Object.entries(map.localToCloud).find(([,v])=>v===uuid);if(found)return Number(found[0])}
   while(map.localToCloud[map.nextId])map.nextId++
-  const id=map.nextId++;map.localToCloud[id]=uuid;return id
+  const id=map.nextId++;map.localToCloud[id]=uuid;index?.set(uuid,id);return id
+}
+// Performance: the reverse lookup above scans the whole identity map, so a full
+// decodeData (run after every account save) was O(words²) — ~72% of CPU per Daily
+// Test action with 1,000 personal words. While a decode runs, localId uses this
+// reverse index instead. It is exact: it keeps the FIRST matching entry in
+// Object.entries order (as .find does), and during a synchronous decode the map
+// only changes through localId adding a UUID that was absent.
+let decodeIndex:{map:IdentityMap;byCloud:Map<string,number>}|undefined
+function withDecodeIndex<T>(map:IdentityMap,run:()=>T):T{
+  if(decodeIndex)return run()
+  const byCloud=new Map<string,number>()
+  for(const [id,uuid] of Object.entries(map.localToCloud))if(!byCloud.has(uuid))byCloud.set(uuid,Number(id))
+  decodeIndex={map,byCloud}
+  try{return run()}finally{decodeIndex=undefined}
 }
 const idLists=new Set(['wordIds','newlyLearnedIds','reviewWordIds','needsReviewIds'])
 function mapSnapshot(value: unknown,map: IdentityMap,encode: boolean,key=''): unknown {
@@ -44,12 +83,15 @@ export function encodeData(data: AppData,map: IdentityMap): Cells {
   cells['activity/start']=json({startedAt:data.learning.activity.startedAt,startedDate:data.learning.activity.startedDate})
   cells['activity/undated']=json(data.learning.activity.undated)
   for(const [day,bucket] of Object.entries(data.learning.activity.days))cells[`activity/${day}`]=json(bucket)
-  for(const [id,record] of Object.entries(data.learning.sessions??{}))cells[`session-record/${id}`]=json(mapSnapshot(record,map,true))
+  for(const [id,record] of Object.entries(data.learning.sessions??{}))cells[`session-record/${id}`]=record.archivedAt?encodeArchived(archivedRecords,record,map,()=>json(mapSnapshot(record,map,true)))!:json(mapSnapshot(record,map,true))
   if(data.learning.session)cells['session/daily']=json(mapSnapshot(data.learning.session,map,true))
   if(data.learning.reviewSession)cells['session/review']=json(mapSnapshot(data.learning.reviewSession,map,true))
   return cells
 }
 export function decodeData(cells: Cells,map: IdentityMap,now=Date.now()): AppData {
+  return withDecodeIndex(map,()=>decodeCells(cells,map,now))
+}
+function decodeCells(cells: Cells,map: IdentityMap,now: number): AppData {
   const vocabulary=emptyUserVocabulary(),history: Record<number,unknown>={},favorites:number[]=[],days:Record<string,Json>={}
   for(const [key,value] of Object.entries(cells)) {
     const [kind,ref]=key.split('/')

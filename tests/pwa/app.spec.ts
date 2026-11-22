@@ -44,7 +44,9 @@ test('mobile layouts, drawer keyboard behavior and accessibility',async({page})=
 test('restart confirmation preserves assessed history without awarding completion',async({page})=>{
  await ready(page);await nav(page,/Daily Test/);await page.getByRole('button',{name:'Start test →'}).click();await page.getByLabel('Turkish meaning',{exact:true}).fill('wrong');await page.getByLabel('Turkish meaning',{exact:true}).press('Enter');await page.getByRole('button',{name:'I knew this',exact:true}).click();await page.reload();await nav(page,/Daily Test/)
  await page.getByRole('button',{name:'Start a new test'}).click();await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeFocused();await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.getByRole('button',{name:'Continue your test'})).toBeVisible();await page.getByRole('button',{name:'Start a new test'}).click();await page.getByRole('button',{name:'Archive and start again'}).click();await expect(page.getByLabel('Question progress')).toHaveText('1 / 10')
- const state=await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!));expect(Object.values(state.sessions).filter((s:any)=>s.archivedAt)).toHaveLength(1);expect(Object.values(state.history).reduce((n:number,h:any)=>n+h.timesTested,0)).toBe(1)
+ const state=await page.evaluate(()=>JSON.parse(localStorage.getItem('kelime-learning-state')!));expect(Object.values(state.sessions).filter((s:any)=>s.archivedAt)).toHaveLength(0);expect(Object.values(state.history).reduce((n:number,h:any)=>n+h.timesTested,0)).toBe(1)
+ // Archived sessions are stored once under their own keys, not rewritten with every save.
+ const archived=await page.evaluate(()=>(JSON.parse(localStorage.getItem('kelime-learning-archive')!) as string[]).map(id=>JSON.parse(localStorage.getItem('kelime-learning-archive:'+id)!)));expect(archived).toHaveLength(1);expect(archived[0].archivedAt).toEqual(expect.any(Number))
 })
 test('update is explicit and deferred while editing',async({page})=>{
  await ready(page);const path='dist/sw.js',original=await readFile(path,'utf8')

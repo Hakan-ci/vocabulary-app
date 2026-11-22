@@ -1,7 +1,7 @@
 import type {StorageAccess} from './localRepository.ts'
 import type {SyncCache} from './models.ts'
 import {parseCache} from './syncService.ts'
-export interface AccountStore {load(key:string,legacy:StorageAccess):Promise<SyncCache>;save(key:string,value:SyncCache):Promise<void>}
+export interface AccountStore {load(key:string,legacy:StorageAccess):Promise<SyncCache>;save(key:string,value:SyncCache|string):Promise<void>}
 export class IndexedAccountStore implements AccountStore {
  private database:Promise<IDBDatabase>|undefined
  constructor(privateName='kelime-accounts'){this.name=privateName}
@@ -20,7 +20,8 @@ export class IndexedAccountStore implements AccountStore {
   await this.save(key,cache)
   return cache
  }
- async save(key:string,value:SyncCache){const db=await this.open();const encoded=JSON.stringify(value);await new Promise<void>((resolve,reject)=>{const tx=db.transaction('accounts','readwrite');tx.objectStore('accounts').put(encoded,key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error??Error('Offline changes could not be saved.'))})}
+ // Accepts an already-serialized cache (SyncService.persist) to avoid encoding twice.
+ async save(key:string,value:SyncCache|string){const db=await this.open();const encoded=typeof value==='string'?value:JSON.stringify(value);await new Promise<void>((resolve,reject)=>{const tx=db.transaction('accounts','readwrite');tx.objectStore('accounts').put(encoded,key);tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(tx.error??Error('Offline changes could not be saved.'))})}
  async close(){(await this.database)?.close()}
 }
 export const accountStore=new IndexedAccountStore()
