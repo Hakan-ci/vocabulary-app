@@ -76,7 +76,11 @@ export class SyncService{
   private acceptSnapshot(snapshot:SyncCache['base']){if(snapshot.revision>=this.cache.base.revision)this.cache.base=snapshot}
   persist(notify=true){
     this.dataVersion++
-    if(this.durable){const copy=structuredClone(this.cache);this.writes=this.writes.then(()=>this.durable!.save(this.key,copy)).then(()=>{this.storageError=false},()=>{this.storageError=true}).then(()=>{if(notify)this.emit()})}
+    // Performance: serialize once. The JSON string is both the point-in-time copy
+    // (replacing structuredClone) and exactly the bytes IndexedAccountStore writes.
+    // A cache that cannot be serialized fails through the write chain, as before.
+    if(this.durable){let encoded:string|Error;try{encoded=JSON.stringify(this.cache)}catch(e){encoded=e instanceof Error?e:Error(String(e))}
+      const payload=encoded;this.writes=this.writes.then(()=>{if(payload instanceof Error)throw payload;return this.durable!.save(this.key,payload)}).then(()=>{this.storageError=false},()=>{this.storageError=true}).then(()=>{if(notify)this.emit()})}
     else try{this.storage.setItem(this.key,JSON.stringify(this.cache));this.storageError=false}catch{this.storageError=true}
     if(notify)this.emit()
   }

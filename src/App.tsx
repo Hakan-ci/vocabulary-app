@@ -76,7 +76,7 @@ function Workspace({app}: {app: Application}) {
   const favoritesStore = { value: app.current.favorites, current: { get current() { return app.current.favorites } }, save: (ids: number[]) => app.saveFavorites(ids) }
   const learningStore = { value: app.current.learning, current: { get current() { return app.current.learning } }, save: (state: typeof app.current.learning) => app.saveLearning(state) }
   const clock = useReviewClock()
-  const favorites = favoritesStore.value
+  const favorites = app.current.favorites
   const history = app.current.learning.history
   const learned = useMemo(() => learnedIds(history, words), [history, words])
   const queue = useMemo(() => reviewQueue(words, history, clock.now,learningStore.value.reviewRequests), [words, history, clock.now,learningStore.value.reviewRequests])
@@ -150,8 +150,12 @@ function Workspace({app}: {app: Application}) {
     if (goals.some(goal => goal === dailyGoal)) learningStore.save({ ...learningStore.current.current, dailyGoal })
   }
   const clearFilters = () => { setSearch(''); setFilters(emptyFilters()) }
-  const filtered = queryCatalog(words, history, favorites, filters, search, sort, clock.now, view === 'favorites' || view === 'learned' ? view : 'all',learningStore.value.reviewRequests)
-  const counts = vocabularyCounts(words,history,clock.now,learningStore.value.reviewRequests)
+  // Performance: only the catalog views (all/favorites/learned) display these, and every
+  // Daily Test save re-renders Workspace, so skip and memoize the full-catalog scans.
+  const catalogView = view === 'all' || view === 'favorites' || view === 'learned'
+  const reviewRequests = learningStore.value.reviewRequests
+  const filtered = useMemo(() => catalogView ? queryCatalog(words, history, favorites, filters, search, sort, clock.now, view === 'favorites' || view === 'learned' ? view : 'all', reviewRequests) : [], [catalogView, words, history, favorites, filters, search, sort, clock.now, view, reviewRequests])
+  const counts = useMemo(() => catalogView ? vocabularyCounts(words, history, clock.now, reviewRequests) : {} as Record<string, number>, [catalogView, words, history, clock.now, reviewRequests])
   const confirmDeletion=()=>{if(!deletionPlan)return;const result=app.deleteWords(deletionPlan.ids);setDeletionPlan(null);setSelecting(false);setSelected(new Set());setImportNotice(`${result.personalIds.length} personal words deleted · ${result.builtInIds.length} built-in words hidden.`)}
   const emptyCollection = (view === 'favorites' && !favorites.length) || (view === 'learned' && !learned.length)
   const changeView = (next: typeof view) => { stopPronunciation();setPracticeQuiz(null);setSelecting(false);setSelected(new Set());setView(next); clearFilters(); clock.refresh() }

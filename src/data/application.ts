@@ -80,6 +80,7 @@ export class Application {
   private emit(){this.version++;for(const listener of this.listeners)listener()}
   get draftScope(){return encodeURIComponent(this.project??'local')+':'+this.scope}
   private projectedVersion=-1
+  private skipProjection=false
   get current(){return this.data}
   get configured(){return !!this.project}
   get status(){return !this.online?'Offline':this.scope==='guest'?'Local only':!this.authenticated?'Changes waiting':this.sync?.status??'Sync error'}
@@ -101,7 +102,7 @@ export class Application {
     catch(e){return {cells:this.sync.cache.base.cells,additions:0,historicalAnswers:0,conflicts:[{key:'identity',label:String(e)+' Choose a separate word or another available target.',device:null,account:null}]}}
   }
   private refresh=()=>{
-    if(this.scope!=='guest'&&this.sync&&this.projectedVersion!==this.sync.dataVersion){try{const nextId=this.sync.cache.identities.nextId;this.data=decodeData(projection(this.sync.cache),this.sync.cache.identities);this.applySelections();if(nextId!==this.sync.cache.identities.nextId)this.sync.persist(false);this.projectedVersion=this.sync.dataVersion}catch(e){this.error=String(e)}}
+    if(!this.skipProjection&&this.scope!=='guest'&&this.sync&&this.projectedVersion!==this.sync.dataVersion){try{const nextId=this.sync.cache.identities.nextId;this.data=decodeData(projection(this.sync.cache),this.sync.cache.identities);this.applySelections();if(nextId!==this.sync.cache.identities.nextId)this.sync.persist(false);this.projectedVersion=this.sync.dataVersion}catch(e){this.error=String(e)}}
     this.emit()
   }
   private applySelections(){for(const source of ['daily','review'] as const){const id=this.sync?.cache.selections?.[source],record=id?this.data.learning.sessions?.[id]:undefined;if(record&&!record.archivedAt){if(source==='daily')this.data.learning.session=record.practice;else this.data.learning.reviewSession={version:2,practice:record.practice}}}}
@@ -191,7 +192,17 @@ export class Application {
     // when a legacy account snapshot lacks current defaults or session archives.
     if(recordKeys)for(const key of new Set([...Object.keys(before),...Object.keys(after)]))if(!recordKeys.includes(key)){if(key in before)after[key]=before[key];else delete after[key]}
     // Tombstones and reads used for deletion are checked in the server transaction too.
-    const id=sync.enqueue(kind,before,after,options);this.data=next;this.emit();return id
+    // Performance: enqueue persists and notifies, which used to run refresh() → a full
+    // decodeData of the account projection (~21% of a signed-in Daily Test click) whose
+    // result was immediately overwritten by `this.data=next` below. When the projection
+    // was current before this enqueue, `next` is exactly what this operation projects,
+    // so skip that throw-away decode and record the projected version directly.
+    // Otherwise (an earlier unprojected change exists) refresh decodes as before.
+    const wasProjected=this.projectedVersion===sync.dataVersion
+    this.skipProjection=wasProjected
+    let id:string|undefined
+    try{id=sync.enqueue(kind,before,after,options)}finally{this.skipProjection=false}
+    this.data=next;if(wasProjected)this.projectedVersion=sync.dataVersion;this.emit();return id
   }
   saveLearning(next:LearningState,kind?:OperationKind) {
     const old=this.data.learning
